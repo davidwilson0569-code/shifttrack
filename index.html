@@ -1085,7 +1085,8 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
     </div>
     <!-- EMPLOYEES (admin) -->
     <div class="page" id="pg-emps">
-      <div class="ph"><div class="ph-left"><span class="ph-emoji">👤</span><div><div class="ph-title">Employee Management</div><div class="ph-sub">Manage accounts & passwords</div></div></div><button class="btn btn-ok" onclick="openAddEmp()">+ Add Employee</button></div>
+      <div class="ph"><div class="ph-left"><span class="ph-emoji">👤</span><div><div class="ph-title">Employee Management</div><div class="ph-sub">Manage accounts & passwords</div></div></div><div class="ph-right"><button class="btn btn-warn" onclick="setupAllAgents()" id="setup-agents-btn">⚙️ Create Login Accounts</button><button class="btn btn-ok" onclick="openAddEmp()">+ Add Employee</button></div></div>
+      <div id="setup-status" style="display:none;margin-bottom:16px;padding:14px 18px;border-radius:var(--r-md);font-size:13px;font-weight:600;line-height:1.6"></div>
       <div class="tbl-wrap"><div class="tbl-scroll"><table>
         <thead><tr><th>#</th><th>Name</th><th>Agent ID</th><th>Shift</th><th>Dept</th><th>Password</th><th>Joined</th><th>Total Hours</th><th>Actions</th></tr></thead>
         <tbody id="emp-body"></tbody>
@@ -2518,6 +2519,96 @@ function toggleWOCell(empId,mondayStr,dayName){
 // ═══════════════════════════════════════════════════════════════
 //  EMPLOYEES
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  ONE-TIME SETUP — create Supabase auth accounts for all agents
+//  Uses the proper signUp API (the method that works reliably)
+// ═══════════════════════════════════════════════════════════════
+async function setupAllAgents(){
+  if(!sb||!SUPABASE_CONFIGURED){
+    toast('This only works in Live Mode','err');return;
+  }
+  if(!session.isAdmin){toast('Admin only','err');return;}
+
+  var statusEl=document.getElementById('setup-status');
+  var btn=document.getElementById('setup-agents-btn');
+  statusEl.style.display='';
+  statusEl.style.background='var(--c-sky-soft)';
+  statusEl.style.color='var(--c-sky)';
+  statusEl.innerHTML='⏳ Checking which agents need login accounts…';
+  btn.disabled=true;
+
+  // Remember admin's current session so we can restore it
+  var adminSession=null;
+  try{ var s=await sb.auth.getSession(); adminSession=s.data.session; }catch(e){}
+
+  // Find agents without auth_user_id (need account creation)
+  var toCreate=[];
+  try{
+    var resp=await sb.from('employees').select('*').order('id');
+    toCreate=(resp.data||[]).filter(function(e){return !e.auth_user_id;});
+  }catch(e){
+    statusEl.style.background='var(--c-ng-soft)';statusEl.style.color='var(--c-ng)';
+    statusEl.innerHTML='❌ Could not load employees: '+(e.message||e);
+    btn.disabled=false;return;
+  }
+
+  if(!toCreate.length){
+    statusEl.style.background='var(--c-ok-soft)';statusEl.style.color='var(--c-ok)';
+    statusEl.innerHTML='✅ All agents already have login accounts! Nothing to do.';
+    btn.disabled=false;return;
+  }
+
+  var created=0,failed=0,errors=[];
+  for(var i=0;i<toCreate.length;i++){
+    var emp=toCreate[i];
+    var email=emp.emp_code.toLowerCase()+'@shifttrack.local';
+    var pw=emp.name.toLowerCase()+'@123';
+    statusEl.innerHTML='⏳ Creating account '+(i+1)+' of '+toCreate.length+': <strong>'+emp.name+'</strong> ('+emp.emp_code+')…';
+
+    try{
+      var sres=await sb.auth.signUp({
+        email:email, password:pw,
+        options:{ data:{ emp_code:emp.emp_code, name:emp.name } }
+      });
+      if(sres.error){
+        if((sres.error.message||'').toLowerCase().indexOf('already')>=0){
+          failed++;errors.push(emp.name+': already exists (link manually)');
+        } else {
+          failed++;errors.push(emp.name+': '+sres.error.message);
+        }
+      } else if(sres.data&&sres.data.user){
+        var ures=await sb.from('employees')
+          .update({auth_user_id:sres.data.user.id})
+          .eq('id',emp.id);
+        if(ures.error){failed++;errors.push(emp.name+': created but link failed');}
+        else{created++;}
+      }
+    }catch(e){
+      failed++;errors.push(emp.name+': '+(e.message||e));
+    }
+    await new Promise(function(r){setTimeout(r,400);});
+  }
+
+  // Restore admin session (signUp switches the active session)
+  try{
+    if(adminSession){
+      await sb.auth.setSession({access_token:adminSession.access_token,refresh_token:adminSession.refresh_token});
+    }
+  }catch(e){}
+
+  await loadFromSupabase();
+
+  if(failed===0){
+    statusEl.style.background='var(--c-ok-soft)';statusEl.style.color='var(--c-ok)';
+    statusEl.innerHTML='✅ Success! Created '+created+' login accounts. All agents can now log in with their Agent ID + password ([firstname]@123).';
+  } else {
+    statusEl.style.background='var(--c-warn-soft)';statusEl.style.color='var(--c-warn)';
+    statusEl.innerHTML='⚠️ Created '+created+', '+failed+' had issues:<br>'+errors.slice(0,10).join('<br>');
+  }
+  btn.disabled=false;
+  renderEmps();
+}
+
 function renderEmps(){
   var tb=document.getElementById('emp-body');if(!tb)return;
   if(!employees.length){tb.innerHTML='<tr><td colspan="9"><div class="tbl-empty">No employees</div></td></tr>';return;}
