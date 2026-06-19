@@ -1085,7 +1085,7 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
     </div>
     <!-- EMPLOYEES (admin) -->
     <div class="page" id="pg-emps">
-      <div class="ph"><div class="ph-left"><span class="ph-emoji">👤</span><div><div class="ph-title">Employee Management</div><div class="ph-sub">Manage accounts & passwords</div></div></div><div class="ph-right"><button class="btn btn-warn" onclick="setupAllAgents()" id="setup-agents-btn">⚙️ Create Login Accounts</button><button class="btn btn-ok" onclick="openAddEmp()">+ Add Employee</button></div></div>
+      <div class="ph"><div class="ph-left"><span class="ph-emoji">👤</span><div><div class="ph-title">Employee Management</div><div class="ph-sub">Manage accounts & passwords</div></div></div><div class="ph-right"><button class="btn btn-ghost" onclick="toggleCreds()" id="cred-toggle">👁 Show passwords</button><button class="btn btn-warn" onclick="setupAllAgents()" id="setup-agents-btn">⚙️ Create Login Accounts</button><button class="btn btn-ok" onclick="openAddEmp()">+ Add Employee</button></div></div>
       <div id="setup-status" style="display:none;margin-bottom:16px;padding:14px 18px;border-radius:var(--r-md);font-size:13px;font-weight:600;line-height:1.6"></div>
       <div class="tbl-wrap"><div class="tbl-scroll"><table>
         <thead><tr><th>#</th><th>Name</th><th>Agent ID</th><th>Shift</th><th>Dept</th><th>Password</th><th>Joined</th><th>Total Hours</th><th>Actions</th></tr></thead>
@@ -2656,6 +2656,23 @@ async function setupAllAgents(){
   renderEmps();
 }
 
+var showCreds=false;
+// The real login password is set by Create Login Accounts as firstname@123.
+function fmtLoginPw(e){ return String(e.name||'').toLowerCase()+'@123'; }
+function toggleCreds(){
+  if(!(session&&session.isAdmin)){toast('Admin only','err');return;}
+  showCreds=!showCreds;
+  var b=document.getElementById('cred-toggle');
+  if(b)b.innerHTML=showCreds?'🙈 Hide passwords':'👁 Show passwords';
+  renderEmps();
+}
+function copyCred(eid){
+  var e=getEmp(eid);if(!e)return;
+  var txt='Agent ID: '+e.empCode+'\nPassword: '+fmtLoginPw(e);
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){toast('✅ Copied '+e.empCode+' login','ok');},function(){toast('Copy failed','err');});
+  } else { toast(txt,'info'); }
+}
 function renderEmps(){
   var tb=document.getElementById('emp-body');if(!tb)return;
   if(!employees.length){tb.innerHTML='<tr><td colspan="9"><div class="tbl-empty">No employees</div></td></tr>';return;}
@@ -2665,7 +2682,9 @@ function renderEmps(){
     '<td style="color:#0096c7;font-weight:800;font-family:var(--font2)">'+e.empCode+'</td>'+
     '<td>'+shiftBadge(e)+'</td>'+
     '<td style="color:var(--text2);font-weight:700">'+(e.role||'—')+'</td>'+
-    '<td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text3);letter-spacing:2px">••••••</span><button class="btn btn-ghost btn-sm" onclick="openChangePw('+e.id+')" title="Change">🔑</button></div></td>'+
+    '<td>'+(showCreds&&session&&session.isAdmin
+      ? '<div style="display:flex;align-items:center;gap:8px"><code style="font-family:var(--font2);font-weight:800;color:#0096c7;font-size:14px">'+fmtLoginPw(e)+'</code><button class="btn btn-ghost btn-sm" onclick="copyCred('+e.id+')" title="Copy Agent ID + password">📋</button><button class="btn btn-ghost btn-sm" onclick="openChangePw('+e.id+')" title="Change">🔑</button></div>'
+      : '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text3);letter-spacing:2px">••••••</span><button class="btn btn-ghost btn-sm" onclick="openChangePw('+e.id+')" title="Change">🔑</button></div>')+'</td>'+
     '<td style="color:var(--text2);font-size:13px">'+(e.joinDate?fmtD(e.joinDate):'—')+'</td>'+
     '<td style="font-size:16px;font-weight:900;color:#00897b;font-family:var(--font2)">'+fmtH(allHrs(e.id))+'</td>'+
     '<td><div style="display:flex;gap:6px"><button class="btn btn-v btn-sm" onclick="openEditEmp('+e.id+')">Edit</button><button class="btn btn-ng btn-sm" onclick="confirmDelEmp('+e.id+')">Delete</button></div></td>'+
