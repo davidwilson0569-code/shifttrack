@@ -1808,7 +1808,20 @@ async function doLogin(){
         btn.disabled=false;btn.innerHTML='Sign In →';
         return;
       }
-      const emp = employees.find(e=>e.auth_user_id===result.user.id);
+      var emp = employees.find(function(e){return e.auth_user_id===result.user.id;});
+      if(!emp){
+        // Fallback: the auth_user_id link is missing on the employee row.
+        // The user has already authenticated as `code` (email is code@domain),
+        // so it is safe to match them to the employee with that Agent ID.
+        var meta = result.user.user_metadata || {};
+        var derived = (meta.emp_code || code || (result.user.email||'').split('@')[0] || '').toUpperCase();
+        emp = employees.find(function(e){return e.empCode && e.empCode.toUpperCase()===derived;});
+        // Best-effort self-heal: write the link so future logins match directly.
+        if(emp && !emp.auth_user_id){
+          emp.auth_user_id = result.user.id;
+          try{ sb.from('employees').update({auth_user_id:result.user.id}).eq('id',emp.id); }catch(e){}
+        }
+      }
       if(!emp){err.textContent='Account exists but no employee record. Contact admin.';btn.disabled=false;btn.innerHTML='Sign In →';return;}
       session = { isAdmin: !!emp.isAdmin, empId: emp.id, emp: emp };
       btn.disabled=false;btn.innerHTML='Sign In →';
@@ -2580,6 +2593,7 @@ async function setupAllAgents(){
   }
 
   var created=0,failed=0,errors=[];
+  var linkPairs=[];
   for(var i=0;i<toCreate.length;i++){
     var emp=toCreate[i];
     var email=authEmail(emp.emp_code);
@@ -2598,11 +2612,10 @@ async function setupAllAgents(){
           failed++;errors.push(emp.name+': '+sres.error.message);
         }
       } else if(sres.data&&sres.data.user){
-        var ures=await sb.from('employees')
-          .update({auth_user_id:sres.data.user.id})
-          .eq('id',emp.id);
-        if(ures.error){failed++;errors.push(emp.name+': created but link failed');}
-        else{created++;}
+        // Defer the link write until after the admin session is restored —
+        // signUp switches the active session to the new agent, who lacks
+        // permission to update the employees table.
+        linkPairs.push({empId:emp.id, userId:sres.data.user.id, name:emp.name});
       }
     }catch(e){
       failed++;errors.push(emp.name+': '+(e.message||e));
@@ -2610,12 +2623,25 @@ async function setupAllAgents(){
     await new Promise(function(r){setTimeout(r,400);});
   }
 
-  // Restore admin session (signUp switches the active session)
+  // Restore admin session BEFORE writing links (signUp switched it away).
   try{
     if(adminSession){
       await sb.auth.setSession({access_token:adminSession.access_token,refresh_token:adminSession.refresh_token});
     }
   }catch(e){}
+
+  // Now write the auth_user_id links under the admin session.
+  for(var k=0;k<linkPairs.length;k++){
+    try{
+      var ures=await sb.from('employees')
+        .update({auth_user_id:linkPairs[k].userId})
+        .eq('id',linkPairs[k].empId);
+      if(ures.error){failed++;errors.push(linkPairs[k].name+': created but link failed ('+ures.error.message+')');}
+      else{created++;}
+    }catch(e){
+      failed++;errors.push(linkPairs[k].name+': created but link errored ('+(e.message||e)+')');
+    }
+  }
 
   await loadFromSupabase();
 
