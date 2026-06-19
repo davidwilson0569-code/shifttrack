@@ -1192,6 +1192,22 @@ if (SUPABASE_CONFIGURED) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  AUTH EMAIL DOMAIN
+//  Agents sign in with their Agent ID; behind the scenes a synthetic
+//  email is built from it for Supabase Auth. The domain MUST be one
+//  Supabase accepts — reserved TLDs like ".local" are now rejected as
+//  invalid. Use a real registered domain (agents never receive mail
+//  here; it is only an internal login identifier).
+//  LEGACY_AUTH_EMAIL_DOMAIN is the old domain that earlier accounts were
+//  created under — sign-in falls back to it so existing agents still work.
+// ═══════════════════════════════════════════════════════════════
+const AUTH_EMAIL_DOMAIN = 'cheapticketsdeal.com';
+const LEGACY_AUTH_EMAIL_DOMAIN = 'shifttrack.local';
+function authEmail(code, legacy){
+  return String(code).toLowerCase() + '@' + (legacy ? LEGACY_AUTH_EMAIL_DOMAIN : AUTH_EMAIL_DOMAIN);
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  SYNC ENGINE — offline-first queue + realtime subscriptions
 //  Priority #1: clock-ins must survive bad WiFi
 //  Priority #2: admin sees live updates as they happen
@@ -1527,10 +1543,15 @@ function saveRecsLocal() { try { localStorage.setItem('st_recs', JSON.stringify(
 // ═══════════════════════════════════════════════════════════════
 async function sbSignIn(empCode, password) {
   if (!sb) return { error: 'Supabase not configured' };
-  const email = empCode.toLowerCase() + '@shifttrack.local';
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) return { error: error.message };
-  return { user: data.user };
+  // Try the current auth domain first, then fall back to the legacy
+  // domain so accounts created before the domain change still sign in.
+  var res = await sb.auth.signInWithPassword({ email: authEmail(empCode), password: password });
+  if (res.error) {
+    var legacy = await sb.auth.signInWithPassword({ email: authEmail(empCode, true), password: password });
+    if (!legacy.error) return { user: legacy.data.user };
+    return { error: res.error.message };
+  }
+  return { user: res.data.user };
 }
 
 async function sbSignOut() {
@@ -1563,10 +1584,8 @@ const SCHEDULE_DATA={
   DAVID: {shift:'9AM-6PM', shiftName:'Shift A', color:'#0096c7', wo:['Friday']},
   ADAM:  {shift:'6PM-3AM', shiftName:'Shift B', color:'#06d6a0', wo:['Saturday']},
   LEA:   {shift:'6PM-3AM', shiftName:'Shift B', color:'#00897b', wo:['Thursday']},
-  ANDREW:{shift:'6PM-3AM', shiftName:'Shift B', color:'#26a69a', wo:['Sunday']},
   ANNA:  {shift:'9PM-6AM', shiftName:'Shift C1',color:'#9b59b6', wo:['Saturday']},
   DINO:  {shift:'10PM-7AM',shiftName:'Shift C2',color:'#8e44ad', wo:['Friday']},
-  ALMA:  {shift:'10PM-7AM',shiftName:'Shift C2',color:'#6c3483', wo:['Tuesday']},
   LUNA:  {shift:'11PM-8AM',shiftName:'Shift C3',color:'#f72585', wo:['Monday']},
   HAZEL: {shift:'11PM-8AM',shiftName:'Shift C3',color:'#c9184a', wo:['Wednesday']},
   BECKY: {shift:'11PM-8AM',shiftName:'Shift C3',color:'#ff4d6d', wo:['Sunday']},
@@ -1577,7 +1596,9 @@ const SCHEDULE_DATA={
   DON:   {shift:'12AM-9AM',shiftName:'Shift D', color:'#e63946', wo:['Sunday']},
   JUSTIN:{shift:'12AM-9AM',shiftName:'Shift D', color:'#457b9d', wo:['Friday']},
   FRANK: {shift:'12AM-9AM',shiftName:'Shift D', color:'#1d3557', wo:['Saturday']},
-  OLIVER:{shift:'12AM-9AM',shiftName:'Shift D', color:'#2b9348', wo:['Wednesday']}
+  OLIVER:{shift:'12AM-9AM',shiftName:'Shift D', color:'#2b9348', wo:['Wednesday']},
+  SAKSHAM:{shift:'10PM-7AM',shiftName:'Shift C2',color:'#3a0ca3', wo:['Sunday']},
+  ARYAN: {shift:'10PM-7AM',shiftName:'Shift C2',color:'#f8961e', wo:['Saturday']}
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -2561,7 +2582,7 @@ async function setupAllAgents(){
   var created=0,failed=0,errors=[];
   for(var i=0;i<toCreate.length;i++){
     var emp=toCreate[i];
-    var email=emp.emp_code.toLowerCase()+'@shifttrack.local';
+    var email=authEmail(emp.emp_code);
     var pw=emp.name.toLowerCase()+'@123';
     statusEl.innerHTML='⏳ Creating account '+(i+1)+' of '+toCreate.length+': <strong>'+emp.name+'</strong> ('+emp.emp_code+')…';
 
