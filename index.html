@@ -1989,8 +1989,31 @@ function renderDash(){
         (st==='in'?'<span class="dot dot-pulse" style="background:#2ec4b6"></span>':'')+lMap[st]+
       '</div>'+
       '<div class="ac-time"><span class="live-time" data-eid="'+e.id+'" style="color:'+(ar?'#2ec4b6':'#9499c0')+'">'+hrs+'</span></div>'+
+      (session.isAdmin&&ar?'<button class="btn btn-sm" style="margin-top:10px;background:#e03131;color:#fff;font-weight:700" onclick="adminClockOut('+e.id+')">⏏ Clock Out</button>':'')+
     '</div>';
   }).join('')||'<div style="color:var(--text3);padding:20px;font-weight:700">No agents currently clocked in</div>';
+}
+
+// Admin force clock-out — for when an agent forgot to clock out.
+function adminClockOut(empId){
+  if(!session.isAdmin)return;
+  var emp=getEmp(empId);if(!emp)return;
+  var ar=activeRec(empId);
+  if(!ar){toast('No active session for '+emp.name,'err');return;}
+  openModal('m-confirm');
+  document.getElementById('m-conf-t').textContent='Clock out '+emp.name+'?';
+  document.getElementById('m-conf-m').textContent='Ends their session now ('+fmtT(Date.now())+'). Use this when an agent forgot to clock out.';
+  document.getElementById('m-conf-ok').textContent='⏏ Clock Out';
+  document.getElementById('m-conf-ok').onclick=function(){
+    var now=Date.now();
+    if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.floor((now-ar.breakStart)/60000);ar.breakEnd=now;ar.breakStart=null;}
+    ar.checkOut=now;
+    saveRecs();closeModal();renderDash();
+    toast('✅ '+emp.name+' clocked out by admin','ok');
+    if(SUPABASE_CONFIGURED&&ar.client_id){
+      enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});
+    }
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2505,6 +2528,7 @@ function confirmDelEmp(eid){
   openModal('m-confirm');
   document.getElementById('m-conf-t').textContent='Delete '+e.name+'?';
   document.getElementById('m-conf-m').textContent='All records will be permanently removed.';
+  document.getElementById('m-conf-ok').textContent='Confirm Delete';
   document.getElementById('m-conf-ok').onclick=function(){
     employees=employees.filter(function(x){return Number(x.id)!==Number(eid);});
     records=records.filter(function(r){return Number(r.empId)!==Number(eid);});
