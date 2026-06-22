@@ -1641,11 +1641,21 @@ function fmtT(ts){if(!ts)return '—';var d=new Date(Number(ts));return d.toLoca
 function fmtD(d){if(!d)return '—';try{return new Date(String(d)+'T00:00').toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'});}catch(x){return d;}}
 function ini(n){return String(n||'').trim().split(' ').map(function(p){return p[0]||'';}).join('').substring(0,2).toUpperCase()||'?';}
 function getEmp(id){return employees.find(function(e){return Number(e.id)===Number(id);})||null;}
-function activeRec(eid){var td=today();return records.find(function(r){return Number(r.empId)===Number(eid)&&r.date===td&&!r.checkOut;})||null;}
+// An open clock-in stays active until the agent clocks out, regardless of
+// how many midnights pass. An open record older than ACTIVE_MAX_MS is treated
+// as abandoned (forgotten clock-out) and is not considered active.
+var ACTIVE_MAX_MS = 18*60*60*1000; // 18h — longer than any shift
+function activeRec(eid){
+  var now=Date.now();
+  var open=records.filter(function(r){return Number(r.empId)===Number(eid)&&!r.checkOut&&(now-Number(r.checkIn))<ACTIVE_MAX_MS;});
+  if(!open.length)return null;
+  open.sort(function(a,b){return Number(b.checkIn)-Number(a.checkIn);});
+  return open[0];
+}
 function recNet(r){if(!r||!r.checkOut)return 0;return Math.max(0,(Number(r.checkOut)-Number(r.checkIn)-(Number(r.breakMins)||0)*60000)/3600000);}
 function liveNet(r){if(!r)return 0;if(r.checkOut)return recNet(r);var bMs=(Number(r.breakMins)||0)*60000+(r.breakStart?Date.now()-Number(r.breakStart):0);return Math.max(0,(Date.now()-Number(r.checkIn)-bMs)/3600000);}
-function todayHrs(eid){var td=today();return records.filter(function(r){return Number(r.empId)===Number(eid)&&r.date===td;}).reduce(function(s,r){return s+liveNet(r);},0);}
-function todayBrk(eid){var td=today();return records.filter(function(r){return Number(r.empId)===Number(eid)&&r.date===td;}).reduce(function(s,r){return s+(Number(r.breakMins)||0)+(r.breakStart&&!r.checkOut?Math.floor((Date.now()-Number(r.breakStart))/60000):0);},0);}
+function todayHrs(eid){var td=today();var sum=records.filter(function(r){return Number(r.empId)===Number(eid)&&r.date===td;}).reduce(function(s,r){return s+liveNet(r);},0);var ar=activeRec(eid);if(ar&&ar.date!==td){sum+=liveNet(ar);}return sum;}
+function todayBrk(eid){var td=today();var sum=records.filter(function(r){return Number(r.empId)===Number(eid)&&r.date===td;}).reduce(function(s,r){return s+(Number(r.breakMins)||0)+(r.breakStart&&!r.checkOut?Math.floor((Date.now()-Number(r.breakStart))/60000):0);},0);var ar=activeRec(eid);if(ar&&ar.date!==td){sum+=(Number(ar.breakMins)||0)+(ar.breakStart?Math.floor((Date.now()-Number(ar.breakStart))/60000):0);}return sum;}
 function allHrs(eid){return records.filter(function(r){return Number(r.empId)===Number(eid)&&r.checkOut;}).reduce(function(s,r){return s+recNet(r);},0);}
 function isIn(eid){return !!activeRec(eid);}
 function isBrk(eid){var ar=activeRec(eid);return !!(ar&&ar.breakStart);}
@@ -1884,6 +1894,7 @@ async function doAdminLogin(){
 function enterApp(){
   document.getElementById('login-wrap').classList.add('hide');
   document.getElementById('app').classList.add('on');
+  closeStaleRecords();
   setupTopbar();buildNav();buildHint();applyStoredCollapse();
   if(session.isAdmin){goTo('dash');setTimeout(function(){fillRptFilters();renderEmps();renderSchedule();},100);}
   else{goTo('myday');}
@@ -2069,6 +2080,34 @@ function doClock(act){
     saveRecs();toast('✅ Break ended. Welcome back!','ok');renderMyDay();
     if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{break_start:null,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
   }
+}
+
+// Close out any open record that's older than the active window — i.e. an
+// overnight/abandoned session that was orphaned by the old midnight bug or a
+// forgotten clock-out. Closes at the agent's scheduled shift end (clamped to
+// now), keeping completed breaks. Admins clean every agent's records; an agent
+// only cleans their own (to respect row-level permissions).
+function closeStaleRecords(){
+  if(!records||!records.length)return;
+  var now=Date.now(),changed=false;
+  records.forEach(function(r){
+    if(r.checkOut)return;
+    if((now-Number(r.checkIn))<ACTIVE_MAX_MS)return; // still active — leave alone
+    if(!session.isAdmin && Number(r.empId)!==Number(session.empId))return;
+    var emp=getEmp(r.empId),co=null;
+    if(emp&&emp.shift&&typeof getShiftWindow==='function'){
+      var win=getShiftWindow(r.date,emp.shift);
+      if(win&&win.end)co=win.end.getTime();
+    }
+    if(co==null||co<=Number(r.checkIn))co=Number(r.checkIn)+8*3600000; // fallback: 8h
+    if(co>now)co=now; // never in the future
+    if(r.breakStart){r.breakEnd=co;r.breakStart=null;}
+    r.checkOut=co;changed=true;
+    if(SUPABASE_CONFIGURED&&r.client_id){
+      enqueueOp({type:'update_record',client_id:r.client_id,payload:{check_out:r.checkOut,break_start:null,break_end:r.breakEnd,break_mins:r.breakMins}});
+    }
+  });
+  if(changed)saveRecs();
 }
 
 // ═══════════════════════════════════════════════════════════════
