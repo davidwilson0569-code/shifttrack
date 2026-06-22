@@ -860,7 +860,6 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
               <option value="half-day">Half Days</option>
               <option value="partial">Partial</option>
               <option value="absent">Absent Only</option>
-              <option value="wo">Weekly Off</option>
             </select>
             <button class="btn btn-v btn-sm" onclick="exportDateHistory()">↓ Export</button>
           </div>
@@ -963,129 +962,6 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
         </table></div></div>
       </div>
     </div>
-    <!-- SHIFT SCHEDULE -->
-    <div class="page" id="pg-shift">
-      <div class="ph">
-        <div class="ph-left"><span class="ph-emoji">🗓️</span><div><div class="ph-title">Shift Schedule</div><div class="ph-sub">Per-week roster · WO changes weekly</div></div></div>
-        <div class="ph-right" id="sched-actions"></div>
-      </div>
-
-      <!-- Roster Upload Card (admin only) -->
-      <div class="card-lg roster-up-card" id="roster-up" style="margin-bottom:20px">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-          <div style="width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#6c63ff,#ff6b9d);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px">📤</div>
-          <div>
-            <div style="font-size:16px;font-weight:900">Auto-Update Roster</div>
-            <div style="font-size:13px;color:var(--text2);font-weight:600">Upload roster image, paste from clipboard, or use the table editor below</div>
-          </div>
-        </div>
-
-        <!-- Upload mode tabs -->
-        <div style="display:flex;background:var(--bg3);border-radius:var(--r12);padding:4px;gap:4px;margin-bottom:16px;max-width:480px">
-          <button class="l-tab on" id="ru-tab-img" onclick="ruSwitch('img',this)">📷 Image Upload</button>
-          <button class="l-tab" id="ru-tab-paste" onclick="ruSwitch('paste',this)">📋 Paste Text</button>
-          <button class="l-tab" id="ru-tab-edit" onclick="ruSwitch('edit',this)">✏️ Manual Edit</button>
-        </div>
-
-        <!-- IMAGE MODE -->
-        <div id="ru-mode-img">
-          <!-- API Key Setup Banner -->
-          <div id="ru-key-banner" class="ru-key-banner">
-            <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
-              <div style="font-size:32px;line-height:1;flex-shrink:0">🔑</div>
-              <div style="flex:1;min-width:240px">
-                <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px">AI Image Extraction Setup</div>
-                <div style="font-size:13px;color:var(--text-2);font-weight:500;line-height:1.5">Image upload uses Claude AI to read your roster automatically. You need a free Anthropic API key (one-time setup, stored only on your computer).</div>
-              </div>
-              <button class="btn btn-v btn-sm" onclick="ruOpenKeyModal()" id="ru-key-btn">⚙️ Set Up API Key</button>
-            </div>
-          </div>
-
-          <div class="ru-drop" id="ru-drop" onclick="ruDropClick()" ondragover="ruDragOver(event)" ondragleave="ruDragLeave(event)" ondrop="ruDrop(event)" tabindex="0">
-            <div style="font-size:48px;margin-bottom:12px">📷</div>
-            <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">Click, drag or paste a roster image</div>
-            <div style="font-size:13px;color:var(--text-2);font-weight:500">Supports PNG, JPG · Press <kbd>Ctrl+V</kbd> to paste from clipboard</div>
-            <input type="file" id="ru-file" accept="image/*" class="hide" onchange="ruFileChoose(event)">
-          </div>
-          <div id="ru-preview-wrap" class="hide" style="margin-top:16px">
-            <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-              <img id="ru-preview" style="max-width:280px;max-height:180px;border-radius:var(--r-md);border:1.5px solid var(--border);object-fit:contain;background:var(--surface-2);box-shadow:var(--sh-sm)"/>
-              <div style="flex:1;min-width:240px">
-                <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px">✓ Image loaded</div>
-                <div style="font-size:13px;color:var(--text-2);font-weight:500;margin-bottom:14px">Click below to extract roster data with AI. The image is sent securely to Anthropic and analyzed by Claude.</div>
-                <div style="display:flex;gap:10px;flex-wrap:wrap">
-                  <button class="btn btn-v" onclick="ruExtract()" id="ru-extract-btn">🤖 Extract with AI</button>
-                  <button class="btn btn-ghost btn-sm" onclick="ruClear()">✕ Remove</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div id="ru-status" class="hide" style="margin-top:16px;padding:14px 18px;border-radius:var(--r-md);font-size:13px;font-weight:600;line-height:1.5"></div>
-        </div>
-
-        <!-- PASTE TEXT MODE -->
-        <div id="ru-mode-paste" class="hide">
-          <div style="font-size:13px;color:var(--text2);font-weight:600;margin-bottom:10px">Paste roster as text. Format: <code style="background:var(--bg3);padding:2px 8px;border-radius:4px;font-family:var(--font2)">Name, Mon, Tue, Wed, Thu, Fri, Sat, Sun</code></div>
-          <textarea id="ru-text" class="finp" placeholder="BELLA, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, WO&#10;DAVID, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, WO, 9AM-6PM, 9AM-6PM&#10;..." style="min-height:180px;font-family:var(--font2);font-size:13px;line-height:1.7;resize:vertical"></textarea>
-          <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
-            <button class="btn btn-v" onclick="ruParseText()">📥 Parse & Preview</button>
-            <button class="btn btn-ghost btn-sm" onclick="ruInsertSample()">📋 Insert Sample</button>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ru-text').value=''">✕ Clear</button>
-          </div>
-        </div>
-
-        <!-- MANUAL EDIT MODE -->
-        <div id="ru-mode-edit" class="hide">
-          <div style="font-size:13px;color:var(--text2);font-weight:600;margin-bottom:10px">Edit the current roster directly. Click any cell to change. Use shift names below.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-            <span class="ru-shift-chip" onclick="ruCopyShift('9AM-6PM')" style="background:#e0f7ff;color:#0277bd">9AM-6PM</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('6PM-3AM')" style="background:#d4f5ef;color:#00897b">6PM-3AM</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('9PM-6AM')" style="background:#ffe0ee;color:#c2185b">9PM-6AM</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('10PM-7AM')" style="background:#ffe0ee;color:#c2185b">10PM-7AM</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('11PM-8AM')" style="background:#ffe0ee;color:#c2185b">11PM-8AM</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('12AM-9AM')" style="background:#fff3e0;color:#e67700">12AM-9AM</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('WO')" style="background:#fff9c4;color:#f57f17">WO</span>
-            <span class="ru-shift-chip" onclick="ruCopyShift('CL')" style="background:#ffe3e3;color:#c92a2a">CL</span>
-            <span style="font-size:11px;color:var(--text3);font-weight:700;align-self:center;margin-left:6px">↑ Click to copy, then paste into cells</span>
-          </div>
-          <div class="sched-wrap" style="margin-bottom:14px"><table class="sched-table" id="ru-edit-table"></table></div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn btn-ok" onclick="ruApplyEdit()">💾 Save Changes</button>
-            <button class="btn btn-ghost btn-sm" onclick="ruRebuildEditTable()">↻ Reset</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Preview / Confirmation Panel -->
-      <div class="card-lg hide" id="roster-preview-card" style="margin-bottom:20px;border:2px solid var(--c1)">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-          <div style="width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#06d6a0,#00897b);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px">✨</div>
-          <div style="flex:1">
-            <div style="font-size:16px;font-weight:900">Preview Extracted Roster</div>
-            <div style="font-size:13px;color:var(--text2);font-weight:600" id="rp-summary">Review changes before applying</div>
-          </div>
-          <div style="display:flex;gap:10px">
-            <button class="btn btn-ok" onclick="ruApplyPreview()">✓ Apply Changes</button>
-            <button class="btn btn-ghost" onclick="ruDiscard()">✕ Discard</button>
-          </div>
-        </div>
-        <div class="sched-wrap"><table class="sched-table" id="rp-table"></table></div>
-      </div>
-
-      <!-- Legend -->
-      <div class="card-lg" style="margin-bottom:20px">
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px">
-          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#4cc9f0,#0096c7)"></div>Shift A — 9AM–6PM</div>
-          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#06d6a0,#00897b)"></div>Shift B — 6PM–3AM</div>
-          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#f72585,#c9184a)"></div>Shift C — 9PM–6AM / 10PM–7AM / 11PM–8AM</div>
-          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#ffd166,#f4a261)"></div>Shift D — 12AM–9AM</div>
-          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:#adb5bd"></div>WO — Weekly Off</div>
-          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#ff6b6b,#c92a2a)"></div>CL — Casual Leave</div>
-        </div>
-      </div>
-
-      <div class="sched-wrap" id="sched-wrap-outer"><div id="sched-table"></div></div>
-    </div>
     <!-- EMPLOYEES (admin) -->
     <div class="page" id="pg-emps">
       <div class="ph"><div class="ph-left"><span class="ph-emoji">👤</span><div><div class="ph-title">Employee Management</div><div class="ph-sub">Manage accounts & passwords</div></div></div><div class="ph-right"><button class="btn btn-ghost" onclick="toggleCreds()" id="cred-toggle">👁 Show passwords</button><button class="btn btn-warn" onclick="setupAllAgents()" id="setup-agents-btn">⚙️ Create Login Accounts</button><button class="btn btn-ok" onclick="openAddEmp()">+ Add Employee</button></div></div>
@@ -1124,37 +1000,6 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
     <div class="m-err" id="m-pw-err"></div>
     <div class="mbtns"><button class="btn btn-ok" onclick="savePw()">Update Password</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>
   </div>
-  <!-- API Key Setup Modal -->
-  <div class="modal-box hide" id="m-apikey" style="max-width:520px">
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div class="modal-title">🔑 Set Up Anthropic API Key</div>
-
-    <div style="background:var(--c-sky-soft);border-left:3px solid var(--c-sky);padding:14px 16px;border-radius:var(--r-md);margin-bottom:18px;font-size:13px;font-weight:500;line-height:1.6;color:var(--text)">
-      <strong style="color:var(--c-sky)">How it works:</strong> Your API key lets this app send your roster image to Claude AI (Anthropic) for reading. The key is saved <strong>only on this computer</strong> in your browser. It's never sent anywhere except directly to Anthropic.
-    </div>
-
-    <div class="mfg">
-      <label>1️⃣ Get your free key (takes 1 minute)</label>
-      <div style="background:var(--bg-soft);border:1px solid var(--border-soft);border-radius:var(--r-md);padding:12px 14px;font-size:13px;line-height:1.7;color:var(--text-2);font-weight:500">
-        Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--primary);font-weight:700;text-decoration:underline">console.anthropic.com/settings/keys</a> → sign up free → click <strong>"Create Key"</strong> → copy it.
-      </div>
-    </div>
-
-    <div class="mfg">
-      <label>2️⃣ Paste your API key here</label>
-      <input class="finp" id="m-apikey-input" type="password" placeholder="sk-ant-..." autocomplete="off" style="font-family:var(--font-mono);font-size:13px">
-      <div style="font-size:12px;color:var(--text-3);margin-top:6px">Starts with <code style="background:var(--bg-soft);padding:2px 6px;border-radius:4px;font-family:var(--font-mono)">sk-ant-</code> · Stored locally only</div>
-    </div>
-
-    <div class="m-err" id="m-apikey-err"></div>
-
-    <div class="mbtns">
-      <button class="btn btn-v" onclick="ruSaveKey()">💾 Save Key</button>
-      <button class="btn btn-ghost" onclick="ruClearKey()" id="m-apikey-clear" style="display:none">🗑 Remove Key</button>
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-    </div>
-  </div>
-
   <div class="modal-box hide" id="m-confirm">
     <button class="modal-close" onclick="closeModal()">✕</button>
     <div style="text-align:center;padding:8px 0 20px"><div style="font-size:48px;margin-bottom:12px">⚠️</div><div style="font-size:18px;font-weight:900;margin-bottom:8px" id="m-conf-t">Are you sure?</div><div style="font-size:14px;color:var(--text3);font-weight:600" id="m-conf-m">This cannot be undone.</div></div>
@@ -1439,7 +1284,7 @@ function _refreshCurrentPageNow() {
         myday: 'renderMyDay', dash: 'renderDash', agentdash: 'renderAgentDash',
         daily: 'renderDailyActivity', logs: 'renderLogs',
         reports: () => { if (typeof renderMonthly==='function') renderMonthly(); if (typeof renderDaily==='function') renderDaily(); },
-        shift: 'renderSchedule', emps: 'renderEmps'
+        emps: 'renderEmps'
       };
       const fn = fns[pid];
       if (typeof fn === 'function') { try { fn(); } catch(e){} }
@@ -1696,50 +1541,14 @@ function isoWeekKey(dateStr){
   var wk=Math.ceil((((t-w1)/86400000)+1)/7);
   return yr+'-W'+String(wk).padStart(2,'0');
 }
-// Get the WO day-names for an employee in the week containing dateStr.
-// Checks woMap (per-week) first, falls back to emp.wo (legacy fixed).
-function getEmpWOForWeek(emp,dateStr){
-  if(!emp)return [];
-  var key=isoWeekKey(dateStr);
-  if(emp.woMap&&emp.woMap[key]&&emp.woMap[key].length>=0){return emp.woMap[key];}
-  return emp.wo||[]; // fallback
-}
-function isWO(emp,d){
-  if(!emp||!d)return false;
-  var dn=new Date(d+'T00:00').toLocaleDateString([],{weekday:'long'});
-  return getEmpWOForWeek(emp,d).indexOf(dn)>=0;
-}
-// Set the WO array for an employee's specific week (preserves CL in same row)
-function setEmpWOForWeek(emp,dateStr,woArr){
-  if(!emp)return;
-  if(!emp.woMap)emp.woMap={};
-  var key=isoWeekKey(dateStr);
-  emp.woMap[key]=woArr.slice();
-  if(SUPABASE_CONFIGURED){
-    enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:key,days:woArr,cl:(emp.clMap&&emp.clMap[key])?emp.clMap[key]:[]}});
-  }
-}
-// Casual-Leave equivalents of the WO helpers
-function getEmpCLForWeek(emp,dateStr){
-  if(!emp)return [];
-  var key=isoWeekKey(dateStr);
-  if(emp.clMap&&emp.clMap[key])return emp.clMap[key];
-  return [];
-}
-function isCL(emp,d){
-  if(!emp||!d)return false;
-  var dn=new Date(d+'T00:00').toLocaleDateString([],{weekday:'long'});
-  return getEmpCLForWeek(emp,d).indexOf(dn)>=0;
-}
-function setEmpCLForWeek(emp,dateStr,clArr){
-  if(!emp)return;
-  if(!emp.clMap)emp.clMap={};
-  var key=isoWeekKey(dateStr);
-  emp.clMap[key]=clArr.slice();
-  if(SUPABASE_CONFIGURED){
-    enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:key,days:(emp.woMap&&emp.woMap[key])?emp.woMap[key]:[],cl:clArr}});
-  }
-}
+// Week-off and Casual-Leave tracking has been removed from the tool.
+// These stubs keep any remaining callers safe by reporting "no WO/CL".
+function getEmpWOForWeek(emp,dateStr){ return []; }
+function isWO(emp,d){ return false; }
+function setEmpWOForWeek(emp,dateStr,woArr){ /* week-off tracking removed */ }
+function getEmpCLForWeek(emp,dateStr){ return []; }
+function isCL(emp,d){ return false; }
+function setEmpCLForWeek(emp,dateStr,clArr){ /* leave tracking removed */ }
 function shiftBadge(emp){
   if(!emp)return '';
   var cls='shift-A';
@@ -1934,7 +1743,7 @@ function enterApp(){
   document.getElementById('app').classList.add('on');
   closeStaleRecords();
   setupTopbar();buildNav();buildHint();applyStoredCollapse();
-  if(session.isAdmin){goTo('dash');setTimeout(function(){fillRptFilters();renderEmps();renderSchedule();},100);}
+  if(session.isAdmin){goTo('dash');setTimeout(function(){fillRptFilters();renderEmps();},100);}
   else{goTo('myday');}
 }
 async function doLogout(){
@@ -1978,14 +1787,12 @@ function buildNav(){
     {id:'daily',label:'Daily Activity',icon:'🎯'},
     {id:'logs',label:'Attendance Logs',icon:'📋'},
     {id:'reports',label:'Reports',icon:'📊'},
-    {id:'shift',label:'Shift Schedule',icon:'🗓️'},
     {id:'emps',label:'Employees',icon:'👤'}
   ]:[
     {id:'myday',label:'My Day',icon:'🏠'},
     {id:'daily',label:'My Activity',icon:'🎯'},
     {id:'logs',label:'My Logs',icon:'📋'},
-    {id:'reports',label:'My Report',icon:'📊'},
-    {id:'shift',label:'My Schedule',icon:'🗓️'}
+    {id:'reports',label:'My Report',icon:'📊'}
   ];
   pages.forEach(function(p){
     var b=document.createElement('button');
@@ -2006,7 +1813,6 @@ function goTo(pid){
   if(pid==='logs')renderLogs();
   if(pid==='reports'){setRptView('monthly');fillRptFilters();renderMonthly();}
   if(pid==='daily')renderDailyActivity();
-  if(pid==='shift'){ruSetupForRole();renderSchedule();ruUpdateKeyBanner();}
   if(pid==='emps')renderEmps();
 }
 
@@ -2155,17 +1961,19 @@ function renderDash(){
   var srch=(document.getElementById('dash-srch')?document.getElementById('dash-srch').value:'').toLowerCase();
   var inNow=employees.filter(function(e){return isIn(e.id)&&!isBrk(e.id);}).length;
   var brkNow=employees.filter(function(e){return isBrk(e.id);}).length;
-  var woNow=employees.filter(function(e){return isWO(e,today());}).length;
   document.getElementById('dash-stats').innerHTML=
     '<div class="stat-card anim-fade" style="background:linear-gradient(135deg,#4cc9f0,#0096c7);color:#fff"><span class="sc-icon">👥</span><div class="sc-label">Total Agents</div><div class="sc-val">'+employees.length+'</div><div class="sc-sub">Registered</div></div>'+
     '<div class="stat-card anim-fade" style="animation-delay:.05s;background:linear-gradient(135deg,#06d6a0,#00897b);color:#fff"><span class="sc-icon">✅</span><div class="sc-label">Clocked In</div><div class="sc-val">'+inNow+'</div><div class="sc-sub">Working now</div></div>'+
     '<div class="stat-card anim-fade" style="animation-delay:.1s;background:linear-gradient(135deg,#ffa94d,#e67700);color:#fff"><span class="sc-icon">☕</span><div class="sc-label">On Break</div><div class="sc-val">'+brkNow+'</div><div class="sc-sub">Resting</div></div>'+
-    '<div class="stat-card anim-fade" style="animation-delay:.15s;background:linear-gradient(135deg,#f72585,#c9184a);color:#fff"><span class="sc-icon">📅</span><div class="sc-label">Weekly Off</div><div class="sc-val">'+woNow+'</div><div class="sc-sub">Today</div></div>'+
-    '<div class="stat-card anim-fade" style="animation-delay:.2s;background:linear-gradient(135deg,#6c63ff,#4b44d4);color:#fff"><span class="sc-icon">💤</span><div class="sc-label">Offline</div><div class="sc-val">'+(employees.length-inNow-brkNow-woNow)+'</div><div class="sc-sub">Not clocked in</div></div>';
-  var filtered=employees.filter(function(e){return e.name.toLowerCase().indexOf(srch)>=0||e.empCode.toLowerCase().indexOf(srch)>=0;});
-  // Prioritise online agents at the top: clocked-in first, on-break next, then
-  // offline, then weekly-off. Offline agents stay listed, just pushed lower.
-  var _rank=function(e){var ar=activeRec(e.id),brk=ar&&!!ar.breakStart,wo=isWO(e,today());if(ar&&!brk)return 0;if(ar&&brk)return 1;if(wo)return 3;return 2;};
+    '<div class="stat-card anim-fade" style="animation-delay:.2s;background:linear-gradient(135deg,#6c63ff,#4b44d4);color:#fff"><span class="sc-icon">💤</span><div class="sc-label">Offline</div><div class="sc-val">'+(employees.length-inNow-brkNow)+'</div><div class="sc-sub">Not clocked in</div></div>';
+  // Only show agents who are currently active (clocked in or on break).
+  // Offline / weekly-off / leave agents drop off the dashboard entirely.
+  var filtered=employees.filter(function(e){
+    if(!activeRec(e.id))return false;
+    return e.name.toLowerCase().indexOf(srch)>=0||e.empCode.toLowerCase().indexOf(srch)>=0;
+  });
+  // Working agents first, then those on break.
+  var _rank=function(e){var ar=activeRec(e.id),brk=ar&&!!ar.breakStart;return ar&&!brk?0:1;};
   filtered.sort(function(a,b){var ra=_rank(a),rb=_rank(b);return ra!==rb?ra-rb:a.name.localeCompare(b.name);});
   document.getElementById('dash-cards').innerHTML=filtered.map(function(e){
     var ar=activeRec(e.id),brk=ar&&!!ar.breakStart,wo=isWO(e,today());
@@ -2182,7 +1990,7 @@ function renderDash(){
       '</div>'+
       '<div class="ac-time"><span class="live-time" data-eid="'+e.id+'" style="color:'+(ar?'#2ec4b6':'#9499c0')+'">'+hrs+'</span></div>'+
     '</div>';
-  }).join('')||'<div style="color:var(--text3);padding:20px;font-weight:700">No agents found</div>';
+  }).join('')||'<div style="color:var(--text3);padding:20px;font-weight:700">No agents currently clocked in</div>';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2518,134 +2326,6 @@ function exportDailyCSV(){
   var csv='Agent,ID,Clock In,Clock Out,Break(min),Net Hours,Shift\n';
   recs.forEach(function(r){var e=getEmp(r.empId)||{name:'?',empCode:'',shift:''};csv+=e.name+','+e.empCode+','+fmtT(r.checkIn)+','+fmtT(r.checkOut)+','+(r.breakMins||0)+','+recNet(r).toFixed(2)+','+e.shift+'\n';});
   dlCSV(csv,'Daily_'+dt+'.csv');toast('✅ Exported!','ok');
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  SHIFT SCHEDULE
-// ═══════════════════════════════════════════════════════════════
-// Track which week is being viewed/edited — defaults to today's week
-var schedWeekDate=null;
-
-function getWeekMonday(dateStr){
-  var d=new Date(dateStr+'T00:00');
-  var dow=d.getDay()||7; // Sunday=0 -> 7
-  d.setDate(d.getDate()-(dow-1));
-  return d.toLocaleDateString('en-CA');
-}
-function shiftWeek(dir){
-  var base=schedWeekDate||today();
-  var d=new Date(base+'T00:00');
-  d.setDate(d.getDate()+dir*7);
-  schedWeekDate=d.toLocaleDateString('en-CA');
-  renderSchedule();
-}
-function gotoThisWeek(){schedWeekDate=today();renderSchedule();}
-
-function renderSchedule(){
-  // Use the wrapper as the mount point — keeps #sched-table alive across renders
-  var wrap=document.getElementById('sched-wrap-outer');
-  if(!wrap){
-    // Fallback: try the inner placeholder div (#sched-table) if wrapper missing
-    var fb=document.getElementById('sched-table');
-    if(!fb)return;
-    wrap=fb.parentElement;
-  }
-  if(!schedWeekDate)schedWeekDate=today();
-  var mondayStr=getWeekMonday(schedWeekDate);
-  var monday=new Date(mondayStr+'T00:00');
-  var todayStr=today();
-  var weekKey=isoWeekKey(mondayStr);
-
-  // Build day headers with dates
-  var dayObjs=[];
-  for(var i=0;i<7;i++){
-    var d=new Date(monday);d.setDate(d.getDate()+i);
-    dayObjs.push({
-      name:DAYS[i],
-      dateStr:d.toLocaleDateString('en-CA'),
-      short:String(d.getDate()),
-      mon:d.toLocaleDateString([],{month:'short'})
-    });
-  }
-
-  // Week navigator (admin only — employees just see the week)
-  var navHtml='';
-  if(session.isAdmin){
-    var endD=new Date(monday);endD.setDate(endD.getDate()+6);
-    var rangeLbl=monday.toLocaleDateString([],{month:'short',day:'numeric'})+' – '+endD.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'})+' · '+weekKey;
-    navHtml='<div class="week-nav">'+
-      '<button class="btn btn-ghost btn-sm" onclick="shiftWeek(-1)">‹ Prev</button>'+
-      '<div class="week-nav-label">📅 <strong>'+rangeLbl+'</strong></div>'+
-      '<button class="btn btn-ghost btn-sm" onclick="shiftWeek(1)">Next ›</button>'+
-      '<button class="btn btn-v btn-sm" onclick="gotoThisWeek()">📍 This Week</button>'+
-      '<div style="font-size:12px;color:var(--text-3);font-weight:600;margin-left:auto">💡 Click any cell to toggle WO ↔ Working</div>'+
-    '</div>';
-  }
-
-  // Build table
-  var html=navHtml+'<table class="sched-table" id="sched-table"><thead><tr><th style="text-align:left">Agent / Day</th>'+
-    dayObjs.map(function(d){
-      var isT=d.dateStr===todayStr;
-      return '<th style="'+(isT?'background:rgba(255,255,255,.3);':'')+'">'+d.name+'<div style="font-size:10px;font-weight:600;opacity:.75;margin-top:2px">'+d.short+' '+d.mon+'</div></th>';
-    }).join('')+
-    '<th style="text-align:center">WO Count</th></tr></thead><tbody>';
-
-  var emps=session.isAdmin?employees:[session.emp];
-  emps.forEach(function(emp){
-    if(!emp)return;
-    var woArr=getEmpWOForWeek(emp,mondayStr);
-    var clArr=getEmpCLForWeek(emp,mondayStr);
-    var woCount=woArr.length;
-    html+='<tr><td class="sched-name" style="background:'+hexA(emp.color,.1)+';border-left:4px solid '+emp.color+'"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:'+emp.color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800">'+ini(emp.name)+'</div><div><div style="font-weight:700">'+emp.name+'</div><div style="font-size:10px;color:var(--text-3);font-weight:600">'+emp.empCode+'</div></div></div></td>';
-    dayObjs.forEach(function(d){
-      var wo=woArr.indexOf(d.name)>=0;
-      var cl=clArr.indexOf(d.name)>=0;
-      var isT=d.dateStr===todayStr;
-      // Compose styles separately so admin/today/cell-type all work
-      var styles=[];
-      if(session.isAdmin)styles.push('cursor:pointer');
-      if(isT)styles.push('outline:2px solid var(--primary)','outline-offset:-2px');
-      var styleAttr=styles.length?(' style="'+styles.join(';')+'"'):'';
-      if(cl){
-        var clClick=session.isAdmin?(' onclick="clearCLCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
-        html+='<td class="cell-cl'+(isT?' cell-today':'')+'"'+clClick+styleAttr+' title="Casual Leave — click to clear">CL</td>';
-      } else if(wo){
-        var clickAttr=session.isAdmin?(' onclick="toggleWOCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
-        html+='<td class="cell-wo'+(isT?' cell-today':'')+'"'+clickAttr+styleAttr+' title="Click to set as working day">WO</td>';
-      } else {
-        var clickAttr2=session.isAdmin?(' onclick="toggleWOCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
-        html+='<td class="cell-work'+(isT?' cell-today':'')+'"'+clickAttr2+styleAttr+' title="Click to mark as Weekly Off">'+emp.shift+'</td>';
-      }
-    });
-    var cntColor=woCount===1?'var(--c-ok)':woCount===0?'var(--c-warn)':'var(--c-ng)';
-    html+='<td style="text-align:center;font-weight:800;color:'+cntColor+';font-family:var(--font-mono)">'+woCount+'</td>';
-    html+='</tr>';
-  });
-  html+='</tbody></table>';
-  wrap.innerHTML=html;
-}
-
-function toggleWOCell(empId,mondayStr,dayName){
-  if(!session.isAdmin)return;
-  var emp=getEmp(empId);if(!emp)return;
-  var cur=getEmpWOForWeek(emp,mondayStr).slice();
-  var idx=cur.indexOf(dayName);
-  if(idx>=0)cur.splice(idx,1);else cur.push(dayName);
-  setEmpWOForWeek(emp,mondayStr,cur);
-  saveEmps();
-  renderSchedule();
-  toast(idx>=0?'✓ '+emp.name+': '+dayName+' is now Working':'✓ '+emp.name+': '+dayName+' marked as Weekly Off','ok');
-}
-function clearCLCell(empId,mondayStr,dayName){
-  if(!session.isAdmin)return;
-  var emp=getEmp(empId);if(!emp)return;
-  var cur=getEmpCLForWeek(emp,mondayStr).slice();
-  var idx=cur.indexOf(dayName);
-  if(idx>=0)cur.splice(idx,1);
-  setEmpCLForWeek(emp,mondayStr,cur);
-  saveEmps();
-  renderSchedule();
-  toast('✓ '+emp.name+': '+dayName+' CL cleared (now Working)','ok');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3327,463 +3007,6 @@ setInterval(function(){
   }
 },5000);
 
-
-// ═══════════════════════════════════════════════════════════════
-//  ROSTER UPLOAD / AUTO-UPDATE SYSTEM
-// ═══════════════════════════════════════════════════════════════
-var ruImgData=null;          // base64 of uploaded image
-var ruPending=null;          // parsed roster awaiting apply: [{name,shifts:[7]}]
-var ruClipboardShift='';     // current shift in clipboard (manual mode)
-
-// Shift detection vocabulary — used by all parsers
-var RU_SHIFTS=['9AM-6PM','6PM-3AM','9PM-6AM','10PM-7AM','11PM-8AM','12AM-9AM'];
-var RU_WO_TOKENS=['WO','OFF','HOLIDAY','REST','-'];
-var RU_CL_TOKENS=['CL','CASUAL','CASUALLEAVE','C/L','LEAVE','SL','SICK'];
-
-// Normalize a raw shift token: handle variations like "9AM - 6PM", "9 AM-6 PM", "9:00AM-6:00PM"
-function ruNormalize(s){
-  if(!s)return '';
-  s=String(s).trim().toUpperCase().replace(/\s+/g,'').replace(/[–—−]/g,'-');
-  if(RU_CL_TOKENS.indexOf(s)>=0)return 'CL';
-  if(RU_WO_TOKENS.indexOf(s)>=0)return 'WO';
-  // Strip colons and minutes (treat 9:00AM as 9AM)
-  s=s.replace(/(\d{1,2}):00(AM|PM)/g,'$1$2');
-  // Map to canonical
-  for(var i=0;i<RU_SHIFTS.length;i++){if(s===RU_SHIFTS[i])return RU_SHIFTS[i];}
-  // Try partial — extract two times
-  var m=s.match(/(\d{1,2})(?::?\d{0,2})?(AM|PM)-(\d{1,2})(?::?\d{0,2})?(AM|PM)/);
-  if(m){
-    var canon=m[1]+m[2]+'-'+m[3]+m[4];
-    for(var j=0;j<RU_SHIFTS.length;j++){if(canon===RU_SHIFTS[j])return RU_SHIFTS[j];}
-  }
-  return s; // return raw uppercase if no match (still shown to user)
-}
-
-// Tab switch
-function ruSwitch(mode,el){
-  document.querySelectorAll('#roster-up .l-tab').forEach(function(b){b.classList.remove('on');});
-  el.classList.add('on');
-  ['img','paste','edit'].forEach(function(m){
-    var x=document.getElementById('ru-mode-'+m);if(x)x.classList.toggle('hide',m!==mode);
-  });
-  if(mode==='edit')ruRebuildEditTable();
-}
-
-// ── IMAGE MODE ─────────────────────────────────────────────────
-function ruDragOver(e){e.preventDefault();document.getElementById('ru-drop').classList.add('drag');}
-function ruDragLeave(e){document.getElementById('ru-drop').classList.remove('drag');}
-function ruDrop(e){e.preventDefault();document.getElementById('ru-drop').classList.remove('drag');var f=e.dataTransfer.files[0];if(f)ruLoadFile(f);}
-function ruPaste(e){
-  // Only act when the Shift page is open AND image mode is active
-  var pg=document.getElementById('pg-shift');
-  if(!pg||!pg.classList.contains('on'))return;
-  var mode=document.getElementById('ru-mode-img');
-  if(!mode||mode.classList.contains('hide'))return;
-  var items=(e.clipboardData||e.originalEvent.clipboardData||{}).items;
-  if(!items)return;
-  for(var i=0;i<items.length;i++){
-    if(items[i].type.indexOf('image')>=0){
-      ruLoadFile(items[i].getAsFile());
-      e.preventDefault();
-      return;
-    }
-  }
-}
-// Attach global paste once
-if(!window._ruPasteAttached){window._ruPasteAttached=true;document.addEventListener('paste',ruPaste);}
-function ruFileChoose(e){var f=e.target.files[0];if(f)ruLoadFile(f);}
-function ruLoadFile(file){
-  if(!file||!file.type||file.type.indexOf('image')<0){toast('❌ Please choose an image file','err');return;}
-  var reader=new FileReader();
-  reader.onload=function(ev){
-    ruImgData=ev.target.result;
-    document.getElementById('ru-preview').src=ruImgData;
-    document.getElementById('ru-preview-wrap').classList.remove('hide');
-    document.getElementById('ru-status').classList.add('hide');
-    toast('✓ Image loaded — click "Auto-Extract"','info');
-  };
-  reader.readAsDataURL(file);
-}
-function ruClear(){
-  ruImgData=null;
-  document.getElementById('ru-preview-wrap').classList.add('hide');
-  document.getElementById('ru-status').classList.add('hide');
-  var f=document.getElementById('ru-file');if(f)f.value='';
-}
-
-// Use Claude AI (when available in artifact env) to extract roster from image
-// API key storage
-var RU_KEY_STORAGE='st_anthropic_key';
-function ruGetKey(){try{return localStorage.getItem(RU_KEY_STORAGE)||'';}catch(e){return '';}}
-function ruHasKey(){return ruGetKey().indexOf('sk-ant-')===0;}
-
-function ruDropClick(){
-  // If no API key, prompt to set up instead of opening file picker
-  if(!ruHasKey()){
-    ruOpenKeyModal();
-    return;
-  }
-  document.getElementById('ru-file').click();
-}
-
-function ruOpenKeyModal(){
-  var input=document.getElementById('m-apikey-input');
-  if(input)input.value=ruGetKey();
-  var clear=document.getElementById('m-apikey-clear');
-  if(clear)clear.style.display=ruHasKey()?'':'none';
-  var err=document.getElementById('m-apikey-err');if(err)err.textContent='';
-  openModal('m-apikey');
-}
-
-function ruSaveKey(){
-  var input=document.getElementById('m-apikey-input');
-  var err=document.getElementById('m-apikey-err');
-  var k=(input.value||'').trim();
-  if(!k){err.textContent='Please paste your API key.';return;}
-  if(k.indexOf('sk-ant-')!==0){err.textContent='API key should start with "sk-ant-"';return;}
-  if(k.length<30){err.textContent='Key looks too short. Please copy the full key.';return;}
-  try{localStorage.setItem(RU_KEY_STORAGE,k);}catch(e){err.textContent='Could not save: '+e.message;return;}
-  closeModal();
-  ruUpdateKeyBanner();
-  toast('✅ API key saved — you can now upload roster images','ok');
-}
-
-function ruClearKey(){
-  try{localStorage.removeItem(RU_KEY_STORAGE);}catch(e){}
-  closeModal();
-  ruUpdateKeyBanner();
-  toast('🗑 API key removed','info');
-}
-
-function ruUpdateKeyBanner(){
-  var banner=document.getElementById('ru-key-banner');
-  if(!banner)return;
-  var btn=document.getElementById('ru-key-btn');
-  if(ruHasKey()){
-    banner.classList.add('ok');
-    banner.innerHTML='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="font-size:28px">✅</div><div style="flex:1;min-width:200px"><div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:2px">AI Image Extraction Ready</div><div style="font-size:13px;color:var(--text-2);font-weight:500">Your API key is saved. Upload an image below to extract roster automatically.</div></div><button class="btn btn-ghost btn-sm" onclick="ruOpenKeyModal()">⚙️ Manage Key</button></div>';
-  } else {
-    banner.classList.remove('ok');
-    banner.innerHTML='<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap"><div style="font-size:32px;line-height:1;flex-shrink:0">🔑</div><div style="flex:1;min-width:240px"><div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px">AI Image Extraction Setup</div><div style="font-size:13px;color:var(--text-2);font-weight:500;line-height:1.5">Image upload uses Claude AI to read your roster automatically. You need a free Anthropic API key (one-time setup, stored only on your computer).</div></div><button class="btn btn-v btn-sm" onclick="ruOpenKeyModal()">⚙️ Set Up API Key</button></div>';
-  }
-}
-
-async function ruExtract(){
-  if(!ruImgData){toast('Load an image first','err');return;}
-  if(!ruHasKey()){
-    ruShowStatus('⚠️ Please set up your Anthropic API key first.','warn');
-    ruOpenKeyModal();
-    return;
-  }
-  var btn=document.getElementById('ru-extract-btn');
-  var origLabel=btn.innerHTML;
-  btn.disabled=true;
-  btn.innerHTML='<span class="splash-ring spin-anim" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:-2px"></span> Reading image…';
-  ruShowStatus('🤖 Claude is reading your roster image. This usually takes 10-20 seconds…','info');
-
-  try {
-    var img=ruImgData.split(',')[1];
-    var mediaType=(ruImgData.match(/data:(image\/[^;]+)/)||[])[1]||'image/png';
-
-    var promptText='You are looking at a weekly employee shift roster table. Extract every visible agent and their 7-day schedule. Respond with ONLY valid JSON (no markdown, no explanation):\n\n{"agents":[{"name":"BELLA","shifts":["9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","WO"]}]}\n\nRules:\n- shifts array MUST have exactly 7 items in order: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday\n- Use "WO" for Weekly Off cells (often shaded yellow)\n- Use "CL" for Casual Leave cells (often shaded red). Keep WO and CL distinct — do NOT merge them.\n- Normalize times to one of: 9AM-6PM, 6PM-3AM, 9PM-6AM, 10PM-7AM, 11PM-8AM, 12AM-9AM\n- Agent names UPPERCASE, no spaces\n- Include ALL agents visible in the image\n- Output ONLY the JSON object, nothing before or after.';
-
-    var resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':ruGetKey(),
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body:JSON.stringify({
-        model:'claude-3-5-sonnet-20241022',
-        max_tokens:2048,
-        messages:[{
-          role:'user',
-          content:[
-            {type:'image',source:{type:'base64',media_type:mediaType,data:img}},
-            {type:'text',text:promptText}
-          ]
-        }]
-      })
-    });
-
-    if(!resp.ok){
-      var errBody=await resp.text();
-      var hint='';
-      if(resp.status===401){hint=' — Your API key seems invalid. Click "Set Up API Key" to update it.';}
-      else if(resp.status===429){hint=' — Rate limit hit. Wait a moment and try again.';}
-      else if(resp.status===400){hint=' — Image format issue. Try a different image.';}
-      throw new Error('API '+resp.status+hint);
-    }
-
-    var data=await resp.json();
-    var txt='';
-    if(data.content&&data.content.length){
-      data.content.forEach(function(b){if(b.type==='text')txt+=b.text;});
-    }
-    if(!txt)throw new Error('Empty response from Claude');
-
-    btn.disabled=false;btn.innerHTML=origLabel;
-    ruHandleAIResult(txt);
-  } catch(err){
-    btn.disabled=false;btn.innerHTML=origLabel;
-    var msg=err.message||String(err);
-    if(msg.indexOf('Failed to fetch')>=0||msg.indexOf('NetworkError')>=0){
-      ruShowStatus('❌ Network error — could not reach Anthropic. Check your internet connection.','err');
-    } else {
-      ruShowStatus('❌ Extraction failed: '+msg+'. Try the "Paste Text" or "Manual Edit" tab instead.','err');
-    }
-  }
-}
-
-function ruHandleAIResult(raw){
-  var btn=document.getElementById('ru-extract-btn');
-  btn.disabled=false;btn.innerHTML='🤖 Auto-Extract with AI';
-  try{
-    var txt=String(raw).trim();
-    // Strip markdown code fences if any
-    txt=txt.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
-    // Find the JSON object
-    var s=txt.indexOf('{'),e=txt.lastIndexOf('}');
-    if(s<0||e<0)throw new Error('No JSON found in AI response');
-    var obj=JSON.parse(txt.substring(s,e+1));
-    if(!obj.agents||!Array.isArray(obj.agents))throw new Error('Invalid roster structure');
-    var roster=obj.agents.map(function(a){
-      var sh=(a.shifts||[]).map(function(x){return ruNormalize(x);});
-      while(sh.length<7)sh.push('');
-      return {name:String(a.name||'').toUpperCase().trim(),shifts:sh.slice(0,7)};
-    }).filter(function(a){return a.name;});
-    if(!roster.length)throw new Error('No agents found');
-    ruPending=roster;
-    ruShowStatus('✓ Successfully extracted '+roster.length+' agents — review preview below','ok');
-    ruShowPreview();
-  } catch(err){
-    ruShowStatus('❌ Could not parse AI response: '+err.message+'. Try "Paste Text" or "Manual Edit" instead.','err');
-  }
-}
-
-function ruShowStatus(msg,kind){
-  var el=document.getElementById('ru-status');
-  el.classList.remove('hide');
-  var bg={ok:'var(--c-ok-soft)',err:'var(--c-ng-soft)',warn:'var(--c-warn-soft)',info:'var(--c-sky-soft)'}[kind]||'var(--c-sky-soft)';
-  var color={ok:'var(--c-ok)',err:'var(--c-ng)',warn:'var(--c-warn)',info:'var(--c-sky)'}[kind]||'var(--c-sky)';
-  el.style.background=bg;el.style.borderLeft='3px solid '+color;el.style.color=color;
-  el.textContent=msg;
-}
-
-// ── PASTE TEXT MODE ────────────────────────────────────────────
-function ruInsertSample(){
-  var sample=
-    'BELLA, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, WO\n'+
-    'DAVID, 9AM-6PM, 9AM-6PM, 9AM-6PM, 9AM-6PM, WO, 9AM-6PM, 9AM-6PM\n'+
-    'ADAM, 6PM-3AM, 6PM-3AM, 6PM-3AM, 6PM-3AM, 6PM-3AM, WO, 6PM-3AM\n'+
-    'JUSTIN, 12AM-9AM, 12AM-9AM, 12AM-9AM, 12AM-9AM, WO, 12AM-9AM, 12AM-9AM\n'+
-    'DON, 12AM-9AM, 12AM-9AM, 12AM-9AM, 12AM-9AM, 12AM-9AM, 12AM-9AM, WO';
-  document.getElementById('ru-text').value=sample;
-  toast('✓ Sample inserted — edit then click Parse','info');
-}
-
-function ruParseText(){
-  var txt=document.getElementById('ru-text').value.trim();
-  if(!txt){toast('Paste roster text first','err');return;}
-  var lines=txt.split(/\r?\n/).filter(function(l){return l.trim();});
-  var roster=[];
-  var errors=[];
-  lines.forEach(function(line,idx){
-    // Skip header rows
-    if(/^(name|agent|day|monday)/i.test(line))return;
-    // Split by tab, comma, semicolon, or 2+ spaces
-    var parts=line.split(/\t|,|;|\s{2,}/).map(function(p){return p.trim();}).filter(function(p){return p;});
-    if(parts.length<2){errors.push('Line '+(idx+1)+': not enough columns');return;}
-    var name=parts[0].toUpperCase().replace(/[^A-Z0-9\s]/g,'').trim();
-    if(!name)return;
-    var shifts=parts.slice(1,8).map(function(p){return ruNormalize(p);});
-    while(shifts.length<7)shifts.push('');
-    roster.push({name:name,shifts:shifts.slice(0,7)});
-  });
-  if(!roster.length){toast('❌ No valid roster lines found','err');return;}
-  if(errors.length)toast('⚠️ '+errors.length+' lines skipped','info');
-  ruPending=roster;
-  ruShowPreview();
-  toast('✓ Parsed '+roster.length+' agents — review below','ok');
-}
-
-// ── MANUAL EDIT MODE ───────────────────────────────────────────
-function ruCopyShift(s){
-  ruClipboardShift=s;
-  // Highlight active chip
-  document.querySelectorAll('.ru-shift-chip').forEach(function(c){c.style.outline='';});
-  event.target.style.outline='3px solid var(--c1)';
-  // Copy to system clipboard too
-  try{navigator.clipboard.writeText(s);}catch(x){}
-  toast('📋 "'+s+'" copied — click any cell or paste','info');
-}
-
-function ruRebuildEditTable(){
-  var tb=document.getElementById('ru-edit-table');if(!tb)return;
-  var DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  var mondayStr=getWeekMonday(schedWeekDate||today());
-  employees.forEach(function(emp){
-    // Use the per-week WO array (so editor matches what's shown on schedule)
-    emp._editWO=getEmpWOForWeek(emp,mondayStr).slice();
-  });
-  var html='<thead><tr><th style="text-align:left">Agent / Day</th>'+DAYS.map(function(d){return '<th>'+d+'</th>';}).join('')+'</tr></thead><tbody>';
-  employees.forEach(function(emp){
-    var woArr=emp._editWO||[];
-    html+='<tr><td class="sched-name" style="background:'+hexA(emp.color,.1)+';border-left:4px solid '+emp.color+'"><div style="display:flex;align-items:center;gap:8px"><div style="width:24px;height:24px;border-radius:50%;background:'+emp.color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900">'+ini(emp.name)+'</div>'+emp.name+'</div></td>';
-    DAYS.forEach(function(d){
-      var wo=woArr.indexOf(d)>=0;
-      var val=wo?'WO':emp.shift;
-      // Use theme tokens for colors so it works in light + dark mode
-      var bg=wo?'var(--c-warn-soft)':'var(--c-ok-soft)';
-      var color=wo?'var(--c-warn)':'var(--c-ok)';
-      html+='<td style="background:'+bg+'"><input class="ru-edit-input" data-eid="'+emp.id+'" data-day="'+d+'" value="'+val+'" style="color:'+color+';font-weight:700" onclick="ruPasteCell(this)" onblur="ruValidateCell(this)" onkeydown="if(event.key===\'Enter\')this.blur()"></td>';
-    });
-    html+='</tr>';
-  });
-  html+='</tbody>';
-  tb.innerHTML=html;
-}
-
-function ruPasteCell(inp){
-  if(ruClipboardShift){
-    inp.value=ruClipboardShift;
-    ruValidateCell(inp);
-  }
-  inp.select();
-}
-
-function ruValidateCell(inp){
-  var v=ruNormalize(inp.value);
-  inp.value=v;
-  var td=inp.parentElement;
-  if(v==='WO'){td.style.background='var(--c-warn-soft)';inp.style.color='var(--c-warn)';}
-  else if(RU_SHIFTS.indexOf(v)>=0){td.style.background='var(--c-ok-soft)';inp.style.color='var(--c-ok)';}
-  else{td.style.background='var(--c-ng-soft)';inp.style.color='var(--c-ng)';}
-}
-
-function ruApplyEdit(){
-  var DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  var inputs=document.querySelectorAll('.ru-edit-input');
-  var mondayStr=getWeekMonday(schedWeekDate||today());
-  // Group by eid
-  var changes={};
-  inputs.forEach(function(inp){
-    var eid=Number(inp.dataset.eid),day=inp.dataset.day,v=ruNormalize(inp.value);
-    if(!changes[eid])changes[eid]={wo:[],shift:null};
-    if(v==='WO')changes[eid].wo.push(day);
-    else if(RU_SHIFTS.indexOf(v)>=0)changes[eid].shift=v;
-  });
-  var n=0;
-  Object.keys(changes).forEach(function(eid){
-    var emp=getEmp(Number(eid));if(!emp)return;
-    var ch=changes[eid];
-    if(ch.shift&&ch.shift!==emp.shift){emp.shift=ch.shift;emp.shiftName=ruShiftName(ch.shift);}
-    // Write into the per-week map for the currently-viewed week
-    setEmpWOForWeek(emp,mondayStr,ch.wo);
-    n++;
-  });
-  saveEmps();renderSchedule();
-  toast('✅ Saved! Updated '+n+' agents for week of '+fmtD(mondayStr),'ok');
-}
-
-function ruShiftName(s){
-  return{'9AM-6PM':'Shift A','6PM-3AM':'Shift B','9PM-6AM':'Shift C1','10PM-7AM':'Shift C2','11PM-8AM':'Shift C3','12AM-9AM':'Shift D'}[s]||'Agent';
-}
-
-// ── PREVIEW & APPLY ────────────────────────────────────────────
-function ruShowPreview(){
-  if(!ruPending)return;
-  var DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  var card=document.getElementById('roster-preview-card');
-  card.classList.remove('hide');
-
-  // Match each parsed name to an existing employee
-  var matched=0,unmatched=0;
-  var rows='<thead><tr><th style="text-align:left">Agent</th>'+DAYS.map(function(d){return '<th>'+d.substring(0,3)+'</th>';}).join('')+'<th>Status</th></tr></thead><tbody>';
-  ruPending.forEach(function(p){
-    var emp=employees.find(function(e){return e.name.toUpperCase()===p.name;});
-    var status=emp?'<span class="badge b-ok">✓ Match</span>':'<span class="badge b-ng">✗ Not found</span>';
-    if(emp)matched++;else unmatched++;
-    var color=emp?emp.color:'#9499c0';
-    rows+='<tr><td class="sched-name" style="background:'+hexA(color,.1)+';border-left:4px solid '+color+'"><div style="display:flex;align-items:center;gap:8px"><div style="width:24px;height:24px;border-radius:50%;background:'+color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900">'+ini(p.name)+'</div>'+p.name+'</div></td>';
-    p.shifts.forEach(function(s,i){
-      var wo=s==='WO', cl=s==='CL';
-      var valid=wo||cl||RU_SHIFTS.indexOf(s)>=0;
-      // Check if this is a change vs current week's roster
-      var changed=false;
-      if(emp){
-        var mondayStrPv=getWeekMonday(schedWeekDate||today());
-        var currentWOArr=getEmpWOForWeek(emp,mondayStrPv);
-        var currentlyWO=currentWOArr.indexOf(DAYS[i])>=0;
-        if(wo&&!currentlyWO)changed=true;
-        else if(!wo&&currentlyWO)changed=true;
-        else if(!wo&&!cl&&s!==emp.shift)changed=true;
-      }
-      var bg=cl?'var(--c-ng-soft)':wo?'var(--c-warn-soft)':valid?'var(--c-ok-soft)':'var(--c-ng-soft)';
-      var col=cl?'var(--c-ng)':wo?'var(--c-warn)':valid?'var(--c-ok)':'var(--c-ng)';
-      var border=changed?'border:2px solid var(--primary)':'';
-      rows+='<td style="background:'+bg+';color:'+col+';'+border+'">'+(s||'—')+(changed?' ✦':'')+'</td>';
-    });
-    rows+='<td>'+status+'</td></tr>';
-  });
-  rows+='</tbody>';
-  document.getElementById('rp-table').innerHTML=rows;
-  document.getElementById('rp-summary').innerHTML=
-    '✓ '+matched+' matched · '+(unmatched?'<span style="color:var(--c-ng)">✗ '+unmatched+' not matched</span>':'all matched')+
-    ' · <span style="color:var(--primary)">✦ marks changed cells</span>';
-  card.scrollIntoView({behavior:'smooth',block:'nearest'});
-}
-
-function ruApplyPreview(){
-  if(!ruPending){toast('Nothing to apply','err');return;}
-  var DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  var mondayStr=getWeekMonday(schedWeekDate||today());
-  var applied=0,skipped=0;
-  ruPending.forEach(function(p){
-    var emp=employees.find(function(e){return e.name.toUpperCase()===p.name;});
-    if(!emp){skipped++;return;}
-    var nonWO=p.shifts.filter(function(s){return s&&s!=='WO'&&s!=='CL'&&RU_SHIFTS.indexOf(s)>=0;});
-    if(nonWO.length){
-      var counts={};
-      nonWO.forEach(function(s){counts[s]=(counts[s]||0)+1;});
-      var top=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];})[0];
-      emp.shift=top;
-      emp.shiftName=ruShiftName(top);
-    }
-    var newWO=[],newCL=[];
-    p.shifts.forEach(function(s,i){if(s==='WO')newWO.push(DAYS[i]);else if(s==='CL')newCL.push(DAYS[i]);});
-    // Write WO + CL for the week into the per-week map (single synced row)
-    var wk=isoWeekKey(mondayStr);
-    emp.woMap=emp.woMap||{}; emp.woMap[wk]=newWO;
-    emp.clMap=emp.clMap||{}; emp.clMap[wk]=newCL;
-    if(SUPABASE_CONFIGURED){
-      enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:wk,days:newWO,cl:newCL}});
-    }
-    applied++;
-  });
-  saveEmps();
-  renderSchedule();
-  ruDiscard();
-  ruClear();
-  document.getElementById('ru-text').value='';
-  toast('✅ Roster updated for week of '+fmtD(mondayStr)+'! '+applied+' agents'+(skipped?' ('+skipped+' skipped)':''),'ok');
-}
-
-function ruDiscard(){
-  ruPending=null;
-  document.getElementById('roster-preview-card').classList.add('hide');
-}
-
-// Show/hide upload card based on admin
-var _renderScheduleOrig=null;
-function ruSetupForRole(){
-  var up=document.getElementById('roster-up');
-  if(up){up.style.display=session.isAdmin?'':'none';}
-  var sa=document.getElementById('sched-actions');
-  if(sa)sa.innerHTML=session.isAdmin?'<button class="btn btn-ghost btn-sm" onclick="renderSchedule()">↻ Refresh</button>':'';
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  MODAL / TOAST / UTIL
