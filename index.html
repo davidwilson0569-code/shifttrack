@@ -2619,11 +2619,18 @@ function viewLeaves(){return `
 
   <h3 class="sec reveal">How the week-off works</h3>
   <div class="vf-defs reveal" id="lvWeekoff">
-    <div class="vf-def"><div class="vf-def-h">✅ You apply ≥ 1 week ahead</div><p>You get your <b>preferred day</b> as your week-off.</p></div>
+    <div class="vf-def"><div class="vf-def-h">✅ You apply ≥ 1 week ahead</div><p>You'll <b>usually</b> get your <b>preferred day</b> — though it's subject to team strength and workload that week.</p></div>
     <div class="vf-def"><div class="vf-def-h">↩️ You don't apply</div><p>We <b>assign your week-off</b> from our end — you don't get to choose the day.</p></div>
   </div>
 
   <div class="note reveal" id="lvUL" style="background:rgba(232,105,61,.08);border-color:rgba(232,105,61,.3);margin-top:16px"><span>💸</span><div><b>The one to remember:</b> an <b>unplanned leave (UL)</b> means that day's salary is deducted — one UL equals one day's pay. Planning ahead with a CL keeps your pay intact.</div></div>
+
+  <h3 class="sec reveal">Three rules that catch people out</h3>
+  <div class="vf-defs reveal">
+    <div class="vf-def"><div class="vf-def-h">⚠️ Week-off + a UL next day = two ULs</div><p>If you take your week-off and then a <b>UL the very next day</b>, it's counted as <b>2 ULs</b> — so <b>two days' salary</b> are deducted, not one. Don't stack a UL onto your week-off.</p></div>
+    <div class="vf-def"><div class="vf-def-h">📅 Apply for CL a month ahead</div><p>Casual leave must be requested <b>at least a month in advance</b> (earlier is better), so it can be approved and the rota planned around it.</p></div>
+    <div class="vf-def"><div class="vf-def-h">🗓️ Week-off: request a week prior</div><p>Place your week-off request <b>at least one week before</b>. It's <b>not always guaranteed</b> — your preferred day depends on team strength and workload that week.</p></div>
+  </div>
 
   <h3 class="sec reveal">Quick check</h3>
   <div class="cquiz reveal" id="lvquiz"></div>
@@ -3594,6 +3601,10 @@ const EXAM_POOL = [
 
   {m:"Leave", q:"To choose your own week-off day, how much notice is needed?", opts:["At least one week","One day","No notice","One month"], a:0},
   {m:"Leave", q:"Which of these costs you a day's pay?", opts:["UL — unplanned leave","An approved CL","An approved week-off","A public holiday"], a:0},
+
+  {m:"Leave", q:"You take your week-off, then a UL the very next day. How is it counted?", opts:["As 2 ULs — two days' salary deducted","As 1 UL","As nothing — the week-off covers it","As a CL"], a:0},
+  {m:"Leave", q:"How far ahead must casual leave (CL) be requested?", opts:["At least a month in advance","The same day","One hour before","No notice needed"], a:0},
+  {m:"Leave", q:"Your week-off request is placed a week ahead. Is your preferred day guaranteed?", opts:["No — it depends on team strength and workload that week","Yes, always","Only on weekends","Only with a CL"], a:0},
 
   {m:"Verification", q:"For card-paid travel within 30 days, your strongest protection is…", opts:["A written \"I approve\" email from the cardholder","A verbal yes on the call","A screenshot of the card","Nothing extra"], a:0},
   {m:"Verification", q:"You spot a red flag on a large booking. The right move is to…", opts:["Slow down and escalate","Push it through faster because it's big","Ignore it","Cancel it without telling anyone"], a:0},
