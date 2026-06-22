@@ -1380,7 +1380,8 @@ function handleRTRecord(payload) {
     if (!records.some(x => x.id === r.id || x.client_id === r.client_id)) records.push(r);
   } else if (payload.eventType === 'UPDATE') {
     const r = mapDbRecord(payload.new);
-    const idx = records.findIndex(x => x.id === r.id);
+    let idx = records.findIndex(x => x.id === r.id);
+    if (idx < 0 && r.client_id) idx = records.findIndex(x => x.client_id === r.client_id);
     if (idx >= 0) records[idx] = r; else records.push(r);
   } else if (payload.eventType === 'DELETE') {
     records = records.filter(x => x.id !== payload.old.id);
@@ -1416,7 +1417,13 @@ function handleRTWO(payload) {
   refreshCurrentPage();
 }
 
+var _refreshTimer=null;
 function refreshCurrentPage() {
+  // Coalesce rapid realtime echoes into a single re-render to avoid flicker.
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(_refreshCurrentPageNow, 300);
+}
+function _refreshCurrentPageNow() {
   // Re-render whichever page is currently open
   const pages = ['myday','dash','agentdash','daily','logs','reports','shift','emps'];
   for (const pid of pages) {
