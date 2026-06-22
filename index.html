@@ -424,6 +424,7 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
 .sched-name{font-weight:700;text-align:left!important;background:var(--surface-2)!important}
 .cell-work{background:var(--c-ok-soft);color:var(--c-ok)}
 .cell-wo{background:var(--c-warn-soft);color:var(--c-warn);font-weight:700}
+.cell-cl{background:var(--c-ng-soft);color:var(--c-ng);font-weight:800}
 .cell-today{background:var(--primary-100)!important;color:var(--primary-h)!important;font-weight:800!important;outline:2px solid var(--primary);outline-offset:-2px}
 
 /* Live status bar */
@@ -1044,6 +1045,7 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
             <span class="ru-shift-chip" onclick="ruCopyShift('11PM-8AM')" style="background:#ffe0ee;color:#c2185b">11PM-8AM</span>
             <span class="ru-shift-chip" onclick="ruCopyShift('12AM-9AM')" style="background:#fff3e0;color:#e67700">12AM-9AM</span>
             <span class="ru-shift-chip" onclick="ruCopyShift('WO')" style="background:#fff9c4;color:#f57f17">WO</span>
+            <span class="ru-shift-chip" onclick="ruCopyShift('CL')" style="background:#ffe3e3;color:#c92a2a">CL</span>
             <span style="font-size:11px;color:var(--text3);font-weight:700;align-self:center;margin-left:6px">↑ Click to copy, then paste into cells</span>
           </div>
           <div class="sched-wrap" style="margin-bottom:14px"><table class="sched-table" id="ru-edit-table"></table></div>
@@ -1078,6 +1080,7 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
           <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#f72585,#c9184a)"></div>Shift C — 9PM–6AM / 10PM–7AM / 11PM–8AM</div>
           <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#ffd166,#f4a261)"></div>Shift D — 12AM–9AM</div>
           <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:#adb5bd"></div>WO — Weekly Off</div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><div style="width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#ff6b6b,#c92a2a)"></div>CL — Casual Leave</div>
         </div>
       </div>
 
@@ -1408,10 +1411,13 @@ function handleRTWO(payload) {
   const emp = getEmp(row.emp_id);
   if (!emp) return;
   if (!emp.woMap) emp.woMap = {};
+  if (!emp.clMap) emp.clMap = {};
   if (payload.eventType === 'DELETE') {
     delete emp.woMap[row.week_key];
+    delete emp.clMap[row.week_key];
   } else {
     emp.woMap[row.week_key] = row.days || [];
+    emp.clMap[row.week_key] = row.cl || [];
   }
   saveEmpsLocal();
   refreshCurrentPage();
@@ -1460,7 +1466,8 @@ function mapDbEmployee(row) {
     joinDate: row.join_date,
     isAdmin: row.is_admin || false,
     auth_user_id: row.auth_user_id,
-    woMap: {}  // filled by separate query
+    woMap: {},  // filled by separate query
+    clMap: {}   // casual-leave map, filled by separate query
   };
 }
 
@@ -1520,7 +1527,10 @@ async function loadFromSupabase() {
     if (e2) throw e2;
     (woRows || []).forEach(row => {
       const emp = employees.find(x => x.id === row.emp_id);
-      if (emp) { emp.woMap = emp.woMap || {}; emp.woMap[row.week_key] = row.days || []; }
+      if (emp) {
+        emp.woMap = emp.woMap || {}; emp.woMap[row.week_key] = row.days || [];
+        emp.clMap = emp.clMap || {}; emp.clMap[row.week_key] = row.cl || [];
+      }
     });
 
     // Load recent records (last 90 days for performance)
@@ -1699,14 +1709,35 @@ function isWO(emp,d){
   var dn=new Date(d+'T00:00').toLocaleDateString([],{weekday:'long'});
   return getEmpWOForWeek(emp,d).indexOf(dn)>=0;
 }
-// Set the WO array for an employee's specific week
+// Set the WO array for an employee's specific week (preserves CL in same row)
 function setEmpWOForWeek(emp,dateStr,woArr){
   if(!emp)return;
   if(!emp.woMap)emp.woMap={};
   var key=isoWeekKey(dateStr);
   emp.woMap[key]=woArr.slice();
   if(SUPABASE_CONFIGURED){
-    enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:key,days:woArr}});
+    enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:key,days:woArr,cl:(emp.clMap&&emp.clMap[key])?emp.clMap[key]:[]}});
+  }
+}
+// Casual-Leave equivalents of the WO helpers
+function getEmpCLForWeek(emp,dateStr){
+  if(!emp)return [];
+  var key=isoWeekKey(dateStr);
+  if(emp.clMap&&emp.clMap[key])return emp.clMap[key];
+  return [];
+}
+function isCL(emp,d){
+  if(!emp||!d)return false;
+  var dn=new Date(d+'T00:00').toLocaleDateString([],{weekday:'long'});
+  return getEmpCLForWeek(emp,d).indexOf(dn)>=0;
+}
+function setEmpCLForWeek(emp,dateStr,clArr){
+  if(!emp)return;
+  if(!emp.clMap)emp.clMap={};
+  var key=isoWeekKey(dateStr);
+  emp.clMap[key]=clArr.slice();
+  if(SUPABASE_CONFIGURED){
+    enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:key,days:(emp.woMap&&emp.woMap[key])?emp.woMap[key]:[],cl:clArr}});
   }
 }
 function shiftBadge(emp){
@@ -2132,6 +2163,10 @@ function renderDash(){
     '<div class="stat-card anim-fade" style="animation-delay:.15s;background:linear-gradient(135deg,#f72585,#c9184a);color:#fff"><span class="sc-icon">📅</span><div class="sc-label">Weekly Off</div><div class="sc-val">'+woNow+'</div><div class="sc-sub">Today</div></div>'+
     '<div class="stat-card anim-fade" style="animation-delay:.2s;background:linear-gradient(135deg,#6c63ff,#4b44d4);color:#fff"><span class="sc-icon">💤</span><div class="sc-label">Offline</div><div class="sc-val">'+(employees.length-inNow-brkNow-woNow)+'</div><div class="sc-sub">Not clocked in</div></div>';
   var filtered=employees.filter(function(e){return e.name.toLowerCase().indexOf(srch)>=0||e.empCode.toLowerCase().indexOf(srch)>=0;});
+  // Prioritise online agents at the top: clocked-in first, on-break next, then
+  // offline, then weekly-off. Offline agents stay listed, just pushed lower.
+  var _rank=function(e){var ar=activeRec(e.id),brk=ar&&!!ar.breakStart,wo=isWO(e,today());if(ar&&!brk)return 0;if(ar&&brk)return 1;if(wo)return 3;return 2;};
+  filtered.sort(function(a,b){var ra=_rank(a),rb=_rank(b);return ra!==rb?ra-rb:a.name.localeCompare(b.name);});
   document.getElementById('dash-cards').innerHTML=filtered.map(function(e){
     var ar=activeRec(e.id),brk=ar&&!!ar.breakStart,wo=isWO(e,today());
     var st=wo?'wo':ar?(brk?'brk':'in'):'out';
@@ -2559,21 +2594,27 @@ function renderSchedule(){
   emps.forEach(function(emp){
     if(!emp)return;
     var woArr=getEmpWOForWeek(emp,mondayStr);
+    var clArr=getEmpCLForWeek(emp,mondayStr);
     var woCount=woArr.length;
     html+='<tr><td class="sched-name" style="background:'+hexA(emp.color,.1)+';border-left:4px solid '+emp.color+'"><div style="display:flex;align-items:center;gap:8px"><div style="width:28px;height:28px;border-radius:50%;background:'+emp.color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800">'+ini(emp.name)+'</div><div><div style="font-weight:700">'+emp.name+'</div><div style="font-size:10px;color:var(--text-3);font-weight:600">'+emp.empCode+'</div></div></div></td>';
     dayObjs.forEach(function(d){
       var wo=woArr.indexOf(d.name)>=0;
+      var cl=clArr.indexOf(d.name)>=0;
       var isT=d.dateStr===todayStr;
       // Compose styles separately so admin/today/cell-type all work
       var styles=[];
       if(session.isAdmin)styles.push('cursor:pointer');
       if(isT)styles.push('outline:2px solid var(--primary)','outline-offset:-2px');
       var styleAttr=styles.length?(' style="'+styles.join(';')+'"'):'';
-      var clickAttr=session.isAdmin?(' onclick="toggleWOCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
-      if(wo){
+      if(cl){
+        var clClick=session.isAdmin?(' onclick="clearCLCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
+        html+='<td class="cell-cl'+(isT?' cell-today':'')+'"'+clClick+styleAttr+' title="Casual Leave — click to clear">CL</td>';
+      } else if(wo){
+        var clickAttr=session.isAdmin?(' onclick="toggleWOCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
         html+='<td class="cell-wo'+(isT?' cell-today':'')+'"'+clickAttr+styleAttr+' title="Click to set as working day">WO</td>';
       } else {
-        html+='<td class="cell-work'+(isT?' cell-today':'')+'"'+clickAttr+styleAttr+' title="Click to mark as Weekly Off">'+emp.shift+'</td>';
+        var clickAttr2=session.isAdmin?(' onclick="toggleWOCell('+emp.id+',\''+mondayStr+'\',\''+d.name+'\')"'):'';
+        html+='<td class="cell-work'+(isT?' cell-today':'')+'"'+clickAttr2+styleAttr+' title="Click to mark as Weekly Off">'+emp.shift+'</td>';
       }
     });
     var cntColor=woCount===1?'var(--c-ok)':woCount===0?'var(--c-warn)':'var(--c-ng)';
@@ -2594,6 +2635,17 @@ function toggleWOCell(empId,mondayStr,dayName){
   saveEmps();
   renderSchedule();
   toast(idx>=0?'✓ '+emp.name+': '+dayName+' is now Working':'✓ '+emp.name+': '+dayName+' marked as Weekly Off','ok');
+}
+function clearCLCell(empId,mondayStr,dayName){
+  if(!session.isAdmin)return;
+  var emp=getEmp(empId);if(!emp)return;
+  var cur=getEmpCLForWeek(emp,mondayStr).slice();
+  var idx=cur.indexOf(dayName);
+  if(idx>=0)cur.splice(idx,1);
+  setEmpCLForWeek(emp,mondayStr,cur);
+  saveEmps();
+  renderSchedule();
+  toast('✓ '+emp.name+': '+dayName+' CL cleared (now Working)','ok');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3285,12 +3337,14 @@ var ruClipboardShift='';     // current shift in clipboard (manual mode)
 
 // Shift detection vocabulary — used by all parsers
 var RU_SHIFTS=['9AM-6PM','6PM-3AM','9PM-6AM','10PM-7AM','11PM-8AM','12AM-9AM'];
-var RU_WO_TOKENS=['WO','OFF','LEAVE','HOLIDAY','REST','-'];
+var RU_WO_TOKENS=['WO','OFF','HOLIDAY','REST','-'];
+var RU_CL_TOKENS=['CL','CASUAL','CASUALLEAVE','C/L','LEAVE','SL','SICK'];
 
 // Normalize a raw shift token: handle variations like "9AM - 6PM", "9 AM-6 PM", "9:00AM-6:00PM"
 function ruNormalize(s){
   if(!s)return '';
   s=String(s).trim().toUpperCase().replace(/\s+/g,'').replace(/[–—−]/g,'-');
+  if(RU_CL_TOKENS.indexOf(s)>=0)return 'CL';
   if(RU_WO_TOKENS.indexOf(s)>=0)return 'WO';
   // Strip colons and minutes (treat 9:00AM as 9AM)
   s=s.replace(/(\d{1,2}):00(AM|PM)/g,'$1$2');
@@ -3431,7 +3485,7 @@ async function ruExtract(){
     var img=ruImgData.split(',')[1];
     var mediaType=(ruImgData.match(/data:(image\/[^;]+)/)||[])[1]||'image/png';
 
-    var promptText='You are looking at a weekly employee shift roster table. Extract every visible agent and their 7-day schedule. Respond with ONLY valid JSON (no markdown, no explanation):\n\n{"agents":[{"name":"BELLA","shifts":["9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","WO"]}]}\n\nRules:\n- shifts array MUST have exactly 7 items in order: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday\n- Use "WO" for Weekly Off / leave / off / holiday cells\n- Normalize times to one of: 9AM-6PM, 6PM-3AM, 9PM-6AM, 10PM-7AM, 11PM-8AM, 12AM-9AM\n- Agent names UPPERCASE, no spaces\n- Include ALL agents visible in the image\n- Output ONLY the JSON object, nothing before or after.';
+    var promptText='You are looking at a weekly employee shift roster table. Extract every visible agent and their 7-day schedule. Respond with ONLY valid JSON (no markdown, no explanation):\n\n{"agents":[{"name":"BELLA","shifts":["9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","9AM-6PM","WO"]}]}\n\nRules:\n- shifts array MUST have exactly 7 items in order: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday\n- Use "WO" for Weekly Off cells (often shaded yellow)\n- Use "CL" for Casual Leave cells (often shaded red). Keep WO and CL distinct — do NOT merge them.\n- Normalize times to one of: 9AM-6PM, 6PM-3AM, 9PM-6AM, 10PM-7AM, 11PM-8AM, 12AM-9AM\n- Agent names UPPERCASE, no spaces\n- Include ALL agents visible in the image\n- Output ONLY the JSON object, nothing before or after.';
 
     var resp=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
@@ -3655,8 +3709,8 @@ function ruShowPreview(){
     var color=emp?emp.color:'#9499c0';
     rows+='<tr><td class="sched-name" style="background:'+hexA(color,.1)+';border-left:4px solid '+color+'"><div style="display:flex;align-items:center;gap:8px"><div style="width:24px;height:24px;border-radius:50%;background:'+color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900">'+ini(p.name)+'</div>'+p.name+'</div></td>';
     p.shifts.forEach(function(s,i){
-      var wo=s==='WO';
-      var valid=wo||RU_SHIFTS.indexOf(s)>=0;
+      var wo=s==='WO', cl=s==='CL';
+      var valid=wo||cl||RU_SHIFTS.indexOf(s)>=0;
       // Check if this is a change vs current week's roster
       var changed=false;
       if(emp){
@@ -3665,10 +3719,10 @@ function ruShowPreview(){
         var currentlyWO=currentWOArr.indexOf(DAYS[i])>=0;
         if(wo&&!currentlyWO)changed=true;
         else if(!wo&&currentlyWO)changed=true;
-        else if(!wo&&s!==emp.shift)changed=true;
+        else if(!wo&&!cl&&s!==emp.shift)changed=true;
       }
-      var bg=wo?'var(--c-warn-soft)':valid?'var(--c-ok-soft)':'var(--c-ng-soft)';
-      var col=wo?'var(--c-warn)':valid?'var(--c-ok)':'var(--c-ng)';
+      var bg=cl?'var(--c-ng-soft)':wo?'var(--c-warn-soft)':valid?'var(--c-ok-soft)':'var(--c-ng-soft)';
+      var col=cl?'var(--c-ng)':wo?'var(--c-warn)':valid?'var(--c-ok)':'var(--c-ng)';
       var border=changed?'border:2px solid var(--primary)':'';
       rows+='<td style="background:'+bg+';color:'+col+';'+border+'">'+(s||'—')+(changed?' ✦':'')+'</td>';
     });
@@ -3690,7 +3744,7 @@ function ruApplyPreview(){
   ruPending.forEach(function(p){
     var emp=employees.find(function(e){return e.name.toUpperCase()===p.name;});
     if(!emp){skipped++;return;}
-    var nonWO=p.shifts.filter(function(s){return s&&s!=='WO'&&RU_SHIFTS.indexOf(s)>=0;});
+    var nonWO=p.shifts.filter(function(s){return s&&s!=='WO'&&s!=='CL'&&RU_SHIFTS.indexOf(s)>=0;});
     if(nonWO.length){
       var counts={};
       nonWO.forEach(function(s){counts[s]=(counts[s]||0)+1;});
@@ -3698,10 +3752,15 @@ function ruApplyPreview(){
       emp.shift=top;
       emp.shiftName=ruShiftName(top);
     }
-    var newWO=[];
-    p.shifts.forEach(function(s,i){if(s==='WO')newWO.push(DAYS[i]);});
-    // Write into per-week map instead of fixed emp.wo
-    setEmpWOForWeek(emp,mondayStr,newWO);
+    var newWO=[],newCL=[];
+    p.shifts.forEach(function(s,i){if(s==='WO')newWO.push(DAYS[i]);else if(s==='CL')newCL.push(DAYS[i]);});
+    // Write WO + CL for the week into the per-week map (single synced row)
+    var wk=isoWeekKey(mondayStr);
+    emp.woMap=emp.woMap||{}; emp.woMap[wk]=newWO;
+    emp.clMap=emp.clMap||{}; emp.clMap[wk]=newCL;
+    if(SUPABASE_CONFIGURED){
+      enqueueOp({type:'upsert_wo',payload:{emp_id:emp.id,week_key:wk,days:newWO,cl:newCL}});
+    }
     applied++;
   });
   saveEmps();
