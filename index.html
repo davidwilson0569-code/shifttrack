@@ -1745,8 +1745,10 @@ function enterApp(){
   setupTopbar();buildNav();buildHint();applyStoredCollapse();
   if(session.isAdmin){goTo('dash');setTimeout(function(){fillRptFilters();renderEmps();},100);}
   else{goTo('myday');}
+  if(sb&&SUPABASE_CONFIGURED)initSignals();
 }
 async function doLogout(){
+  teardownSignals();
   await sbSignOut();
   session={isAdmin:false,empId:null,emp:null};
   document.getElementById('app').classList.remove('on');
@@ -1757,6 +1759,54 @@ async function doLogout(){
   var dc=document.getElementById('da-quick-chips');if(dc)dc.dataset.built='';
   var pw=document.getElementById('da-emp-picker-wrap');if(pw)pw.style.display='';
   document.getElementById('login-wrap').classList.remove('hide');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ADMIN SIGNALS — remote force-logout via Realtime broadcast
+//  Admin sends a 'force_logout' for an agent; that agent's live app
+//  (if open and connected) receives it and signs itself out. Cannot
+//  reach an agent whose app is closed — their token just expires.
+// ═══════════════════════════════════════════════════════════════
+var SIG={channel:null};
+function initSignals(){
+  if(!sb || !SUPABASE_CONFIGURED || SIG.channel) return;
+  SIG.channel=sb.channel('admin-signals',{config:{broadcast:{self:false}}});
+  SIG.channel.on('broadcast',{event:'force_logout'},function(msg){
+    var eid=msg&&msg.payload?msg.payload.emp_id:null;
+    if(eid!=null && session && !session.isAdmin && Number(session.empId)===Number(eid)){
+      toast('You have been signed out by an administrator.','info');
+      setTimeout(function(){ doLogout(); }, 700);
+    }
+  });
+  SIG.channel.subscribe();
+}
+function teardownSignals(){
+  if(SIG.channel){ try{ sb.removeChannel(SIG.channel); }catch(e){} SIG.channel=null; }
+}
+function adminForceLogout(empId){
+  if(!session.isAdmin)return;
+  var emp=getEmp(empId);if(!emp)return;
+  if(!sb || !SUPABASE_CONFIGURED){toast('Remote logout needs the live connection.','err');return;}
+  openModal('m-confirm');
+  document.getElementById('m-conf-t').textContent='Log out '+emp.name+'?';
+  document.getElementById('m-conf-m').textContent='Signs '+emp.name+' out of the app if their session is live now. Any open shift is clocked out first.';
+  document.getElementById('m-conf-ok').textContent='⎋ Log Out';
+  document.getElementById('m-conf-ok').onclick=function(){
+    // Close any open session so we don't leave it running
+    var ar=activeRec(empId);
+    if(ar){
+      var now=Date.now();
+      if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.floor((now-ar.breakStart)/60000);ar.breakEnd=now;ar.breakStart=null;}
+      ar.checkOut=now;saveRecs();
+      if(ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
+    }
+    // Signal the agent's live client to sign itself out
+    if(SIG.channel){ try{ SIG.channel.send({type:'broadcast',event:'force_logout',payload:{emp_id:empId}}); }catch(e){} }
+    closeModal();
+    if(typeof renderDash==='function')renderDash();
+    if(typeof renderEmps==='function')renderEmps();
+    toast('⎋ Logout signal sent to '+emp.name,'ok');
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2488,7 +2538,7 @@ function renderEmps(){
       : '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text3);letter-spacing:2px">••••••</span><button class="btn btn-ghost btn-sm" onclick="openChangePw('+e.id+')" title="Change">🔑</button></div>')+'</td>'+
     '<td style="color:var(--text2);font-size:13px">'+(e.joinDate?fmtD(e.joinDate):'—')+'</td>'+
     '<td style="font-size:16px;font-weight:900;color:#00897b;font-family:var(--font2)">'+fmtH(allHrs(e.id))+'</td>'+
-    '<td><div style="display:flex;gap:6px"><button class="btn btn-v btn-sm" onclick="openEditEmp('+e.id+')">Edit</button><button class="btn btn-ng btn-sm" onclick="confirmDelEmp('+e.id+')">Delete</button></div></td>'+
+    '<td><div style="display:flex;gap:6px"><button class="btn btn-sm" style="background:#f59f00;color:#fff" onclick="adminForceLogout('+e.id+')" title="Sign this agent out of the app if their session is live">⎋ Log Out</button><button class="btn btn-v btn-sm" onclick="openEditEmp('+e.id+')">Edit</button><button class="btn btn-ng btn-sm" onclick="confirmDelEmp('+e.id+')">Delete</button></div></td>'+
   '</tr>';}).join('');
 }
 function openAddEmp(){editingEmpId=null;document.getElementById('m-emp-title').textContent='➕ Add Employee';['m-name','m-role','m-code','m-dept','m-pw'].forEach(function(id){document.getElementById(id).value='';});document.getElementById('m-join').value='';document.getElementById('m-shift').value='9AM-6PM';document.getElementById('m-emp-err').textContent='';openModal('m-emp');}
