@@ -1017,10 +1017,11 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
     <button class="modal-close" onclick="closeModal()">✕</button>
     <div class="modal-title">☕ How long is your break?</div>
     <div style="font-size:13px;color:var(--text3);font-weight:600;margin-bottom:14px">Pick a duration — you'll get a sound and an on-screen alert when it's over. Breaks still auto-end at the 60m cap.</div>
+    <div id="bd-notif" style="font-size:12px;font-weight:700;margin-bottom:12px"></div>
     <div id="brk-chips" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px"></div>
     <div class="mfg"><label>Custom (minutes, max 60)</label><div style="display:flex;gap:8px"><input class="finp" id="m-bd-mins" type="number" min="1" max="60" step="1" placeholder="e.g. 4" onkeydown="if(event.key==='Enter')startPlannedBreak(null)"><button class="btn btn-ok" onclick="startPlannedBreak(null)" style="flex-shrink:0">Start</button></div></div>
     <div class="m-err" id="m-bd-err"></div>
-    <div class="mbtns"><button class="btn btn-ghost" onclick="startPlannedBreak(0)">No timer — just start break</button></div>
+    <div class="mbtns"><button class="btn btn-ghost" onclick="testBreakAlert()">🔔 Test alert</button><button class="btn btn-ghost" onclick="startPlannedBreak(0)">No timer — just start break</button></div>
   </div>
   <div class="modal-box hide" id="m-brkover" style="text-align:center">
     <div style="font-size:56px;margin:6px 0 10px;animation:pop .3s ease">☕</div>
@@ -1542,11 +1543,10 @@ var _brkWarned = {};      // rec id -> already warned this session
 // when it's up we play a sound, show a full-screen "break over" popup, and
 // fire a desktop notification (covers minimized/background tabs). Plans are
 // stored in localStorage on the agent's machine (no DB schema change needed).
-var BRK_ALERT_REBEEP_MS = 60000;  // re-beep every 60s while overdue…
-var BRK_ALERT_MAX_BEEPS = 5;      // …up to 5 times
+var BRK_ALERT_REBEEP_MS = 60000;  // re-alert (sound + system notification) every 60s until the break is ended
 var _audioCtx = null;
 // Build stamp — check the browser console (F12) to confirm which version is live
-var ST_BUILD='v2.1 \u2014 break planner + popup (2026-07-29)';
+var ST_BUILD='v2.2 \u2014 cross-tab break alerts (2026-07-29)';
 try{console.log('%cShiftTrack Pro '+ST_BUILD,'color:#6c63ff;font-weight:bold;font-size:13px');}catch(e){}
 function activeRec(eid){
   var now=Date.now();
@@ -1658,18 +1658,44 @@ function fmtBrkTicker(ar){
   if(p){var rem=Number(p.start)+p.mins*60000-Date.now();return rem>=0?fmtEla(rem)+' left':'+'+fmtEla(-rem)+' over';}
   return fmtEla(Date.now()-Number(ar.breakStart));
 }
+var _origTitle=document.title,_titleFlash=false;
+function setOverdueTitle(on){
+  if(on){_titleFlash=!_titleFlash;document.title=(_titleFlash?'\u2615':'\u23f0')+' BREAK OVER \u2014 '+_origTitle;}
+  else if(document.title!==_origTitle)document.title=_origTitle;
+}
+function updateNotifStatus(){
+  var ns=document.getElementById('bd-notif');if(!ns)return;
+  if(!('Notification' in window)){ns.textContent='';return;}
+  if(Notification.permission==='granted'){ns.style.color='#2ec4b6';ns.textContent='\ud83d\udd14 Desktop alerts ON \u2014 break-over alerts will reach you on any tab or app.';}
+  else if(Notification.permission==='denied'){ns.style.color='#ff6b6b';ns.textContent='\ud83d\udd15 Desktop alerts BLOCKED \u2014 click the lock icon in the address bar \u2192 Notifications \u2192 Allow. Until then, alerts only show inside this tab.';}
+  else{ns.style.color='#ffd166';ns.textContent='\ud83d\udd14 Click Allow on the notification prompt so alerts reach you on other tabs.';}
+}
+function testBreakAlert(){
+  playBrkBeep();
+  try{
+    if('Notification' in window&&Notification.permission==='granted'){
+      var n=new Notification('\ud83d\udd14 ShiftTrack test alert',{body:'This is how break-over alerts will appear \u2014 even when you\u2019re on another tab or app.',tag:'st-brk-test'});
+      n.onclick=function(){try{window.focus();}catch(e){}try{n.close();}catch(e){}};
+      toast('\ud83d\udd14 Test sent \u2014 check your system notification.','ok');
+    }else{
+      toast('\ud83d\udd0a Sound works. Desktop notifications: '+(('Notification' in window)?Notification.permission:'unsupported')+'.','info');
+      updateNotifStatus();
+    }
+  }catch(e){}
+}
 function openBrkDur(){
   var ar=activeRec(session.empId);
   if(!ar){toast('Clock in first.','err');return;}
   if(ar.breakStart){toast('Already on break.','err');return;}
   // We're inside a user click: unlock audio + request notification permission now
   try{_audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();if(_audioCtx.state==='suspended')_audioCtx.resume();}catch(e){}
-  try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();}catch(e){}
+  try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission().then(function(){updateNotifStatus();});}catch(e){}
   var chips=[3,5,10,15,20,30,45,60];
   document.getElementById('brk-chips').innerHTML=chips.map(function(m){return '<button class="btn btn-v" style="font-family:var(--font2);font-weight:800" onclick="startPlannedBreak('+m+')">'+m+'m</button>';}).join('');
   document.getElementById('m-bd-mins').value='';
   document.getElementById('m-bd-err').textContent='';
   openModal('m-brkdur');
+  updateNotifStatus();
 }
 function startPlannedBreak(mins){
   if(mins===null){
@@ -1700,10 +1726,11 @@ function playBrkBeep(){
     });
   }catch(e){}
 }
-function notifyBrkOver(emp,mins){
+function notifyBrkOver(emp,mins,overMin){
   try{
     if('Notification' in window&&Notification.permission==='granted'){
-      new Notification('\u2615 Break time is over',{body:'Hi '+(emp?emp.name:'')+', your '+mins+'-minute break is up. Tap End Break when you\u2019re back at your desk.',tag:'st-brk-over',requireInteraction:true});
+      var n=new Notification('\u2615 Break time is over'+(overMin>0?' (+'+overMin+'m)':''),{body:'Hi '+(emp?emp.name:'')+', your '+mins+'-minute break is up. Click here to jump back to ShiftTrack and end your break.',tag:'st-brk-over',renotify:true,requireInteraction:true});
+      n.onclick=function(){try{window.focus();}catch(e){}try{n.close();}catch(e){}};
     }
   }catch(e){}
 }
@@ -1727,19 +1754,20 @@ function updateBrkOverPopup(){
 }
 function endBreakFromPopup(){closeModal();doClock('brkE');}
 function checkBreakPlanAlerts(){
-  if(!session||!session.empId)return;
+  if(!session||!session.empId){setOverdueTitle(false);return;}
   var ar=activeRec(session.empId);
-  if(!ar||!ar.breakStart)return;
-  var p=getBrkPlan(ar);if(!p)return;
+  if(!ar||!ar.breakStart){setOverdueTitle(false);return;}
+  var p=getBrkPlan(ar);if(!p){setOverdueTitle(false);return;}
   var now=Date.now(),endAt=Number(p.start)+p.mins*60000;
-  if(now<endAt)return;
+  if(now<endAt){setOverdueTitle(false);return;}
+  setOverdueTitle(true); // tab title flashes "BREAK OVER" so it stands out in the tab strip
   var emp=getEmp(session.empId);
   if(!p.alerted){
-    p.alerted=true;p.beeps=1;p.lastBeep=now;setBrkPlan(ar,p);
-    playBrkBeep();notifyBrkOver(emp,p.mins);showBrkOverPopup(p);
-  }else if(p.beeps<BRK_ALERT_MAX_BEEPS&&now-p.lastBeep>=BRK_ALERT_REBEEP_MS){
-    p.beeps++;p.lastBeep=now;setBrkPlan(ar,p);
-    playBrkBeep();
+    p.alerted=true;p.lastBeep=now;setBrkPlan(ar,p);
+    playBrkBeep();notifyBrkOver(emp,p.mins,0);showBrkOverPopup(p);
+  }else if(now-p.lastBeep>=BRK_ALERT_REBEEP_MS){
+    p.lastBeep=now;setBrkPlan(ar,p);
+    playBrkBeep();notifyBrkOver(emp,p.mins,Math.floor((now-endAt)/60000));
     if(!brkOverPopupOpen())showBrkOverPopup(p);
   }
 }
