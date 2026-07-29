@@ -1545,6 +1545,9 @@ var _brkWarned = {};      // rec id -> already warned this session
 var BRK_ALERT_REBEEP_MS = 60000;  // re-beep every 60s while overdue…
 var BRK_ALERT_MAX_BEEPS = 5;      // …up to 5 times
 var _audioCtx = null;
+// Build stamp — check the browser console (F12) to confirm which version is live
+var ST_BUILD='v2.1 \u2014 break planner + popup (2026-07-29)';
+try{console.log('%cShiftTrack Pro '+ST_BUILD,'color:#6c63ff;font-weight:bold;font-size:13px');}catch(e){}
 function activeRec(eid){
   var now=Date.now();
   var open=records.filter(function(r){return Number(r.empId)===Number(eid)&&!r.checkOut&&(now-Number(r.checkIn))<ACTIVE_MAX_MS;});
