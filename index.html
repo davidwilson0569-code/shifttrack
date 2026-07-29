@@ -781,7 +781,7 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
       <div id="ad-drill" class="hide" style="margin-top:22px">
         <div class="ph" style="margin-bottom:14px"><div class="ph-left"><span class="ph-emoji">📅</span><div class="ph-title" style="font-size:18px" id="drill-title">Daily Log</div></div><button class="btn btn-ghost btn-sm" onclick="hideDrill()">✕ Close</button></div>
         <div class="tbl-wrap"><div class="tbl-scroll"><table>
-          <thead><tr><th>Date</th><th>Day</th><th>Clock In</th><th>Clock Out</th><th>Break</th><th>Net Hours</th><th>Shift</th><th>Status</th></tr></thead>
+          <thead><tr><th>Date</th><th>Day</th><th>Clock In</th><th>Clock Out</th><th>Break</th><th>Net Hours</th><th>Shift</th><th>Status</th><th>Fix</th></tr></thead>
           <tbody id="drill-body"></tbody>
         </table></div></div>
       </div>
@@ -1004,6 +1004,30 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
     <button class="modal-close" onclick="closeModal()">✕</button>
     <div style="text-align:center;padding:8px 0 20px"><div style="font-size:48px;margin-bottom:12px">⚠️</div><div style="font-size:18px;font-weight:900;margin-bottom:8px" id="m-conf-t">Are you sure?</div><div style="font-size:14px;color:var(--text3);font-weight:600" id="m-conf-m">This cannot be undone.</div></div>
     <div class="mbtns"><button class="btn btn-ng" id="m-conf-ok">Confirm Delete</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>
+  </div>
+  <div class="modal-box hide" id="m-fixbrk">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title">✏️ Fix Break Time</div>
+    <div style="font-size:13px;color:var(--text3);font-weight:600;margin-bottom:14px" id="m-fb-ctx"></div>
+    <div class="mfg"><label>Total break for this day (minutes)</label><input class="finp" id="m-fb-mins" type="number" min="0" step="1" placeholder="e.g. 30" onkeydown="if(event.key==='Enter')saveFixBreak()"></div>
+    <div class="m-err" id="m-fb-err"></div>
+    <div class="mbtns"><button class="btn btn-ok" onclick="saveFixBreak()">Save Correction</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>
+  </div>
+  <div class="modal-box hide" id="m-brkdur">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title">☕ How long is your break?</div>
+    <div style="font-size:13px;color:var(--text3);font-weight:600;margin-bottom:14px">Pick a duration — you'll get a sound and an on-screen alert when it's over. Breaks still auto-end at the 60m cap.</div>
+    <div id="brk-chips" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px"></div>
+    <div class="mfg"><label>Custom (minutes, max 60)</label><div style="display:flex;gap:8px"><input class="finp" id="m-bd-mins" type="number" min="1" max="60" step="1" placeholder="e.g. 4" onkeydown="if(event.key==='Enter')startPlannedBreak(null)"><button class="btn btn-ok" onclick="startPlannedBreak(null)" style="flex-shrink:0">Start</button></div></div>
+    <div class="m-err" id="m-bd-err"></div>
+    <div class="mbtns"><button class="btn btn-ghost" onclick="startPlannedBreak(0)">No timer — just start break</button></div>
+  </div>
+  <div class="modal-box hide" id="m-brkover" style="text-align:center">
+    <div style="font-size:56px;margin:6px 0 10px;animation:pop .3s ease">☕</div>
+    <div style="font-size:22px;font-weight:900;margin-bottom:6px">Break time is over!</div>
+    <div style="font-size:14px;color:var(--text3);font-weight:600;margin-bottom:4px" id="bo-plan"></div>
+    <div style="font-size:16px;font-weight:800;color:#ff6b6b;font-family:var(--font2);margin-bottom:18px" id="bo-over"></div>
+    <div class="mbtns" style="justify-content:center"><button class="btn btn-ok" style="font-size:15px;padding:12px 22px" onclick="endBreakFromPopup()">▶ End Break &amp; Resume</button><button class="btn btn-ghost" onclick="closeModal()">I need a few more minutes</button></div>
   </div>
 </div>
 
@@ -1507,6 +1531,20 @@ function getEmp(id){return employees.find(function(e){return Number(e.id)===Numb
 // how many midnights pass. An open record older than ACTIVE_MAX_MS is treated
 // as abandoned (forgotten clock-out) and is not considered active.
 var ACTIVE_MAX_MS = 18*60*60*1000; // 18h — longer than any shift
+// Break guard: remind the agent, then auto-end a break nobody remembered to
+// stop. Credit per break is capped at BREAK_MAX_MIN so one forgotten break
+// can't wipe out a day's net hours. Admin corrects any day via ✏️ in the
+// Agent Dashboard daily log.
+var BREAK_WARN_MIN = 45;  // reminder toast at 45 minutes
+var BREAK_MAX_MIN  = 60;  // hard cap — break auto-ends here
+var _brkWarned = {};      // rec id -> already warned this session
+// Break planner + alerts: the agent picks a duration when starting a break;
+// when it's up we play a sound, show a full-screen "break over" popup, and
+// fire a desktop notification (covers minimized/background tabs). Plans are
+// stored in localStorage on the agent's machine (no DB schema change needed).
+var BRK_ALERT_REBEEP_MS = 60000;  // re-beep every 60s while overdue…
+var BRK_ALERT_MAX_BEEPS = 5;      // …up to 5 times
+var _audioCtx = null;
 function activeRec(eid){
   var now=Date.now();
   var open=records.filter(function(r){return Number(r.empId)===Number(eid)&&!r.checkOut&&(now-Number(r.checkIn))<ACTIVE_MAX_MS;});
@@ -1606,22 +1644,155 @@ function applyStoredCollapse(){
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  BREAK PLANNER — agent-chosen duration + sound/notification/email
+// ═══════════════════════════════════════════════════════════════
+function brkPlanKey(r){return 'st_brkplan_'+(r.client_id||r.id);}
+function getBrkPlan(r){if(!r)return null;try{var p=JSON.parse(localStorage.getItem(brkPlanKey(r))||'null');return p&&p.mins>0?p:null;}catch(e){return null;}}
+function setBrkPlan(r,p){try{localStorage.setItem(brkPlanKey(r),JSON.stringify(p));}catch(e){}}
+function clearBrkPlan(r){if(!r)return;try{localStorage.removeItem(brkPlanKey(r));}catch(e){}}
+function fmtBrkTicker(ar){
+  var p=getBrkPlan(ar);
+  if(p){var rem=Number(p.start)+p.mins*60000-Date.now();return rem>=0?fmtEla(rem)+' left':'+'+fmtEla(-rem)+' over';}
+  return fmtEla(Date.now()-Number(ar.breakStart));
+}
+function openBrkDur(){
+  var ar=activeRec(session.empId);
+  if(!ar){toast('Clock in first.','err');return;}
+  if(ar.breakStart){toast('Already on break.','err');return;}
+  // We're inside a user click: unlock audio + request notification permission now
+  try{_audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();if(_audioCtx.state==='suspended')_audioCtx.resume();}catch(e){}
+  try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();}catch(e){}
+  var chips=[3,5,10,15,20,30,45,60];
+  document.getElementById('brk-chips').innerHTML=chips.map(function(m){return '<button class="btn btn-v" style="font-family:var(--font2);font-weight:800" onclick="startPlannedBreak('+m+')">'+m+'m</button>';}).join('');
+  document.getElementById('m-bd-mins').value='';
+  document.getElementById('m-bd-err').textContent='';
+  openModal('m-brkdur');
+}
+function startPlannedBreak(mins){
+  if(mins===null){
+    mins=parseInt(document.getElementById('m-bd-mins').value,10);
+    if(isNaN(mins)||mins<1){document.getElementById('m-bd-err').textContent='Enter minutes (1\u2013'+BREAK_MAX_MIN+').';return;}
+  }
+  if(mins>BREAK_MAX_MIN)mins=BREAK_MAX_MIN;
+  closeModal();
+  doClock('brkS');
+  var ar=activeRec(session.empId);
+  if(ar&&ar.breakStart&&mins>0){
+    setBrkPlan(ar,{mins:mins,start:Number(ar.breakStart),alerted:false,beeps:0,lastBeep:0});
+    toast('\u23f3 '+mins+'-minute break \u2014 you\u2019ll be alerted when it\u2019s over.','info');
+  }
+}
+function playBrkBeep(){
+  try{
+    _audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    var ctx=_audioCtx;if(ctx.state==='suspended')ctx.resume();
+    [0,0.22,0.44].forEach(function(t){
+      var o=ctx.createOscillator(),g=ctx.createGain();
+      o.type='sine';o.frequency.value=880;
+      g.gain.setValueAtTime(0.0001,ctx.currentTime+t);
+      g.gain.exponentialRampToValueAtTime(0.3,ctx.currentTime+t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+t+0.18);
+      o.connect(g);g.connect(ctx.destination);
+      o.start(ctx.currentTime+t);o.stop(ctx.currentTime+t+0.2);
+    });
+  }catch(e){}
+}
+function notifyBrkOver(emp,mins){
+  try{
+    if('Notification' in window&&Notification.permission==='granted'){
+      new Notification('\u2615 Break time is over',{body:'Hi '+(emp?emp.name:'')+', your '+mins+'-minute break is up. Tap End Break when you\u2019re back at your desk.',tag:'st-brk-over',requireInteraction:true});
+    }
+  }catch(e){}
+}
+function showBrkOverPopup(p){
+  var el=document.getElementById('m-brkover');
+  if(!el)return;
+  document.getElementById('bo-plan').textContent='You planned a '+p.mins+'-minute break.';
+  openModal('m-brkover');
+  updateBrkOverPopup();
+}
+function brkOverPopupOpen(){
+  var bg=document.getElementById('modal-bg'),el=document.getElementById('m-brkover');
+  return !!(bg&&el&&!bg.classList.contains('hide')&&!el.classList.contains('hide'));
+}
+function updateBrkOverPopup(){
+  if(!brkOverPopupOpen())return;
+  var ar=activeRec(session.empId),p=ar?getBrkPlan(ar):null;
+  if(!ar||!ar.breakStart||!p){closeModal();return;} // break ended elsewhere — dismiss
+  var over=Date.now()-(Number(p.start)+p.mins*60000);
+  document.getElementById('bo-over').textContent=over>0?'Over by '+fmtEla(over):'';
+}
+function endBreakFromPopup(){closeModal();doClock('brkE');}
+function checkBreakPlanAlerts(){
+  if(!session||!session.empId)return;
+  var ar=activeRec(session.empId);
+  if(!ar||!ar.breakStart)return;
+  var p=getBrkPlan(ar);if(!p)return;
+  var now=Date.now(),endAt=Number(p.start)+p.mins*60000;
+  if(now<endAt)return;
+  var emp=getEmp(session.empId);
+  if(!p.alerted){
+    p.alerted=true;p.beeps=1;p.lastBeep=now;setBrkPlan(ar,p);
+    playBrkBeep();notifyBrkOver(emp,p.mins);showBrkOverPopup(p);
+  }else if(p.beeps<BRK_ALERT_MAX_BEEPS&&now-p.lastBeep>=BRK_ALERT_REBEEP_MS){
+    p.beeps++;p.lastBeep=now;setBrkPlan(ar,p);
+    playBrkBeep();
+    if(!brkOverPopupOpen())showBrkOverPopup(p);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BREAK GUARD — reminder + auto-end for forgotten breaks
+// ═══════════════════════════════════════════════════════════════
+function autoEndOverBreaks(){
+  if(!records||!records.length||!session||(!session.isAdmin&&!session.empId))return;
+  var now=Date.now(),changed=false;
+  records.forEach(function(r){
+    if(!r.breakStart||r.checkOut)return;
+    if(!session.isAdmin&&Number(r.empId)!==Number(session.empId))return; // row-level perms: agents only touch their own
+    var ela=now-Number(r.breakStart);
+    if(ela>=BREAK_WARN_MIN*60000&&ela<BREAK_MAX_MIN*60000&&!_brkWarned[r.id]){
+      _brkWarned[r.id]=true;
+      if(Number(r.empId)===Number(session.empId))toast('⏰ Still on break ('+BREAK_WARN_MIN+'m). It auto-ends at '+BREAK_MAX_MIN+'m.','info');
+    }
+    if(ela>=BREAK_MAX_MIN*60000){
+      r.breakEnd=Number(r.breakStart)+BREAK_MAX_MIN*60000;
+      r.breakMins=(Number(r.breakMins)||0)+BREAK_MAX_MIN;
+      r.breakStart=null;clearBrkPlan(r);delete _brkWarned[r.id];changed=true;
+      if(Number(r.empId)===Number(session.empId))toast('⏱ Break auto-ended at the '+BREAK_MAX_MIN+'-minute limit.','info');
+      else{var _e=getEmp(r.empId);toast('⏱ '+(_e?_e.name:'Agent')+"'s forgotten break auto-ended at "+BREAK_MAX_MIN+'m.','info');}
+      if(SUPABASE_CONFIGURED&&r.client_id){enqueueOp({type:'update_record',client_id:r.client_id,payload:{break_start:null,break_end:r.breakEnd,break_mins:r.breakMins}});}
+    }
+  });
+  if(changed){
+    saveRecs();
+    var pm=document.getElementById('pg-myday');
+    if(pm&&pm.classList.contains('on')&&typeof renderMyDay==='function')renderMyDay();
+    var pd=document.getElementById('pg-dash');
+    if(pd&&pd.classList.contains('on')&&typeof renderDash==='function')renderDash();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  LIVE CLOCK
 // ═══════════════════════════════════════════════════════════════
 function startClock(){
   setInterval(function(){
+    try{autoEndOverBreaks();}catch(e){}
+    try{checkBreakPlanAlerts();}catch(e){}
+    try{updateBrkOverPopup();}catch(e){}
     var t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     var el=document.getElementById('tb-clock');if(el)el.textContent=t;
     var tk=document.getElementById('live-ticker');
     if(tk&&session.empId){
       var ar=activeRec(session.empId),since=parseInt(tk.dataset.since||'0');
       if(tk.dataset.mode==='in'&&since){
-        if(ar&&ar.breakStart){tk.textContent=fmtEla(Date.now()-Number(ar.breakStart));tk.style.color='#ff9800';}
+        if(ar&&ar.breakStart){var _p=getBrkPlan(ar),_ov=_p&&Date.now()>Number(_p.start)+_p.mins*60000;tk.textContent=fmtBrkTicker(ar);tk.style.color=_ov?'#ff6b6b':'#ff9800';}
         else{tk.textContent=fmtEla(Date.now()-since-(ar?(Number(ar.breakMins)||0)*60000:0));tk.style.color='rgba(255,255,255,.95)';}
       }else{tk.textContent=t;tk.style.color='rgba(255,255,255,.6)';}
     }
     var bl=document.getElementById('brk-live');
-    if(bl&&session.empId){var ar=activeRec(session.empId);if(ar&&ar.breakStart)bl.textContent=fmtEla(Date.now()-Number(ar.breakStart));}
+    if(bl&&session.empId){var ar=activeRec(session.empId);if(ar&&ar.breakStart)bl.textContent=fmtBrkTicker(ar);}
     document.querySelectorAll('.live-time[data-eid]').forEach(function(el){
       var eid=el.dataset.eid,ar=activeRec(eid);
       if(ar&&ar.breakStart){el.textContent='Break: '+fmtEla(Date.now()-Number(ar.breakStart));el.style.color='#ff9800';}
@@ -1796,7 +1967,7 @@ function adminForceLogout(empId){
     var ar=activeRec(empId);
     if(ar){
       var now=Date.now();
-      if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.floor((now-ar.breakStart)/60000);ar.breakEnd=now;ar.breakStart=null;}
+      if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.min(Math.floor((now-ar.breakStart)/60000),BREAK_MAX_MIN);ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
       ar.checkOut=now;saveRecs();
       if(ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
     }
@@ -1872,7 +2043,7 @@ function goTo(pid){
 function renderMyDay(){
   if(!session.empId)return;
   var emp=session.emp||getEmp(session.empId);if(!emp)return;
-  var ar=activeRec(emp.id),brk=ar&&!!ar.breakStart;
+  var ar=activeRec(emp.id),brk=ar&&!!ar.breakStart;var brkPlan=brk?getBrkPlan(ar):null;
   var status=ar?(brk?'brk':'in'):'out';
   var tH=todayHrs(emp.id),totH=allHrs(emp.id),brkM=todayBrk(emp.id);
   var since=ar?Number(ar.checkIn):0;
@@ -1892,7 +2063,7 @@ function renderMyDay(){
       '<div class="ticker-block">'+
         '<div class="ticker-lbl">'+(status==='in'?'Work Session':status==='brk'?'Break Timer':'Current Time')+'</div>'+
         '<div class="ticker-val" id="live-ticker" data-mode="'+(status!=='out'?'in':'idle')+'" data-since="'+since+'" style="color:'+(status==='out'?'rgba(255,255,255,.5)':status==='brk'?'#ffd166':'rgba(255,255,255,.95)')+'">--:--:--</div>'+
-        '<div class="ticker-sub">'+(status==='in'?'Clocked in at <strong>'+fmtT(ar.checkIn)+'</strong>':status==='brk'?'Break since <strong>'+fmtT(ar.breakStart)+'</strong>':tH>0?'Total today: <strong>'+fmtH(tH)+'</strong>':'Tap Clock In to begin your shift')+'</div>'+
+        '<div class="ticker-sub">'+(status==='in'?'Clocked in at <strong>'+fmtT(ar.checkIn)+'</strong>':status==='brk'?'Break since <strong>'+fmtT(ar.breakStart)+'</strong>'+(brkPlan?' · planned <strong>'+brkPlan.mins+'m</strong>':''):tH>0?'Total today: <strong>'+fmtH(tH)+'</strong>':'Tap Clock In to begin your shift')+'</div>'+
       '</div>'+
       '<div class="mini-grid">'+
         '<div class="mini-cell"><div class="mini-lbl">Today Net</div><div class="mini-val">'+fmtH(tH)+'</div></div>'+
@@ -1904,7 +2075,7 @@ function renderMyDay(){
           ?'<button class="hero-btn hb-in" onclick="doClock(\'in\')">▶ Clock In</button>'
           :status==='in'
             ?'<button class="hero-btn hb-out" onclick="doClock(\'out\')">■ Clock Out</button>'+
-             '<button class="hero-btn hb-brk" onclick="doClock(\'brkS\')">☕ Start Break</button>'
+             '<button class="hero-btn hb-brk" onclick="openBrkDur()">☕ Start Break</button>'
             :'<button class="hero-btn hb-ebrk" onclick="doClock(\'brkE\')">▶ End Break <span id="brk-live" style="font-family:var(--font2);font-size:14px">00:00</span></button>'+
              '<button class="hero-btn hb-out" onclick="doClock(\'out\')">■ Clock Out</button>'
         )+
@@ -1960,7 +2131,7 @@ function doClock(act){
     if(SUPABASE_CONFIGURED){enqueueOp({type:'insert_record',payload:recToDb(rec)});}
   } else if(act==='out'){
     if(!ar){toast('No active session.','err');return;}
-    if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.floor((now-ar.breakStart)/60000);ar.breakEnd=now;ar.breakStart=null;}
+    if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.min(Math.floor((now-ar.breakStart)/60000),BREAK_MAX_MIN);ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
     ar.checkOut=now;saveRecs();toast('✅ Clocked out. Great work!','ok');renderMyDay();
     if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
   } else if(act==='brkS'){
@@ -1970,8 +2141,10 @@ function doClock(act){
     if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{break_start:ar.breakStart}});}
   } else if(act==='brkE'){
     if(!ar||!ar.breakStart){toast('No active break.','err');return;}
-    ar.breakMins=(ar.breakMins||0)+Math.floor((now-ar.breakStart)/60000);ar.breakEnd=now;ar.breakStart=null;
-    saveRecs();toast('✅ Break ended. Welcome back!','ok');renderMyDay();
+    var bEla=Math.floor((now-ar.breakStart)/60000),bOver=bEla>BREAK_MAX_MIN;
+    ar.breakMins=(ar.breakMins||0)+Math.min(bEla,BREAK_MAX_MIN);
+    ar.breakEnd=bOver?Number(ar.breakStart)+BREAK_MAX_MIN*60000:now;ar.breakStart=null;clearBrkPlan(ar);
+    saveRecs();toast(bOver?'⏱ Break ran '+fmtHM(bEla)+' — counted at the '+BREAK_MAX_MIN+'m cap.':'✅ Break ended. Welcome back!',bOver?'info':'ok');renderMyDay();
     if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{break_start:null,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
   }
 }
@@ -1995,7 +2168,7 @@ function closeStaleRecords(){
     }
     if(co==null||co<=Number(r.checkIn))co=Number(r.checkIn)+8*3600000; // fallback: 8h
     if(co>now)co=now; // never in the future
-    if(r.breakStart){r.breakEnd=co;r.breakStart=null;}
+    if(r.breakStart){r.breakEnd=co;r.breakStart=null;clearBrkPlan(r);}
     r.checkOut=co;changed=true;
     if(SUPABASE_CONFIGURED&&r.client_id){
       enqueueOp({type:'update_record',client_id:r.client_id,payload:{check_out:r.checkOut,break_start:null,break_end:r.breakEnd,break_mins:r.breakMins}});
@@ -2133,11 +2306,40 @@ function showDrill(eid){
         '<td style="color:#e67700;font-weight:700">'+(r.breakMins?r.breakMins+'m':'—')+'</td>'+
         '<td style="font-size:16px;font-weight:900;color:#0096c7;font-family:var(--font2)">'+fmtH(recNet(r))+'</td>'+
         '<td>'+shiftBadge(e)+'</td>'+
-        '<td><span class="badge b-ok">Complete</span></td></tr>';
+        '<td><span class="badge b-ok">Complete</span></td>'+
+        '<td><button class="btn btn-ghost btn-sm" title="Correct break minutes" onclick="openFixBreak(\''+r.id+'\')">✏️</button></td></tr>';
     }).join('')
-    :'<tr><td colspan="8"><div class="tbl-empty">No records for this period</div></td></tr>';
+    :'<tr><td colspan="9"><div class="tbl-empty">No records for this period</div></td></tr>';
 }
 function hideDrill(){document.getElementById('ad-drill').classList.add('hide');}
+
+// ── Admin: correct a day's break minutes (forgotten End Break etc.) ──
+var _fixBrkId=null;
+function openFixBreak(rid){
+  if(!session.isAdmin){toast('Admin only.','err');return;}
+  var r=records.find(function(x){return String(x.id)===String(rid);});
+  if(!r){toast('Record not found.','err');return;}
+  _fixBrkId=r.id;
+  var e=getEmp(r.empId);
+  document.getElementById('m-fb-ctx').textContent=(e?e.name+' · ':'')+fmtD(r.date)+' — currently '+(Number(r.breakMins)||0)+'m'+(r.breakStart?' (break still running)':'');
+  document.getElementById('m-fb-mins').value=Number(r.breakMins)||0;
+  document.getElementById('m-fb-err').textContent='';
+  openModal('m-fixbrk');
+}
+function saveFixBreak(){
+  var err=document.getElementById('m-fb-err');
+  var r=records.find(function(x){return String(x.id)===String(_fixBrkId);});
+  if(!r){err.textContent='Record not found.';return;}
+  var v=parseInt(document.getElementById('m-fb-mins').value,10);
+  if(isNaN(v)||v<0){err.textContent='Enter break minutes (0 or more).';return;}
+  r.breakMins=v;
+  if(r.breakStart){r.breakEnd=Date.now();r.breakStart=null;clearBrkPlan(r);}
+  saveRecs();
+  if(SUPABASE_CONFIGURED&&r.client_id){enqueueOp({type:'update_record',client_id:r.client_id,payload:{break_start:r.breakStart,break_end:r.breakEnd,break_mins:r.breakMins}});}
+  closeModal();toast('✅ Break corrected to '+v+'m.','ok');
+  if(typeof renderAgentDash==='function')renderAgentDash();
+  if(r.empId&&typeof showDrill==='function')showDrill(r.empId);
+}
 function exportAgentCSV(){
   var period=document.getElementById('ad-period')?document.getElementById('ad-period').value:'month';
   var csv='Agent,ID,Shift,Login Hours,Break Time(min),Break Count,Days Active,Avg Hours/Day\n';
