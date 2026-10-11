@@ -1005,6 +1005,11 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
     <div style="text-align:center;padding:8px 0 20px"><div style="font-size:48px;margin-bottom:12px">⚠️</div><div style="font-size:18px;font-weight:900;margin-bottom:8px" id="m-conf-t">Are you sure?</div><div style="font-size:14px;color:var(--text3);font-weight:600" id="m-conf-m">This cannot be undone.</div></div>
     <div class="mbtns"><button class="btn btn-ng" id="m-conf-ok">Confirm Delete</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>
   </div>
+  <div class="modal-box hide" id="m-logout">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div style="text-align:center;padding:8px 0 20px"><div style="font-size:48px;margin-bottom:12px">⏱</div><div style="font-size:18px;font-weight:900;margin-bottom:8px">You are still clocked in</div><div style="font-size:14px;color:var(--text3);font-weight:600">Logging out does not stop your shift timer. Do you want to clock out as well?</div></div>
+    <div class="mbtns"><button class="btn btn-ng" onclick="logoutChoice(true)">Clock Out &amp; Log Out</button><button class="btn btn-ghost" onclick="logoutChoice(false)">Log Out Only</button></div>
+  </div>
   <div class="modal-box hide" id="m-fixbrk">
     <button class="modal-close" onclick="closeModal()">✕</button>
     <div class="modal-title">✏️ Fix Break Time</div>
@@ -1104,9 +1109,32 @@ function saveQueue() {
   try { localStorage.setItem('st_sync_queue', JSON.stringify(SYNC.queue)); } catch(e) {}
 }
 
+// How long an unsynced action is kept and retried before giving up.
+// (Was: dropped after 10 failed tries = about 5 minutes of bad WiFi, which
+// silently lost clock-outs.)
+const OP_MAX_AGE_MS = 72 * 60 * 60 * 1000;
+
+function opCid(op) {
+  return op.client_id || (op.payload && op.payload.client_id) || null;
+}
+function signedIn() {
+  return !!(session && (session.empId || session.isAdmin));
+}
+// Does this queued action belong to whoever is signed in right now?
+function opIsMine(op) {
+  if (!signedIn()) return false;
+  if (op.by === undefined || op.by === null) return true;   // older / admin-without-agent actions
+  return Number(op.by) === Number(session.empId);
+}
+function myPendingCount() {
+  return SYNC.queue.filter(function (o) { return !o.done && opIsMine(o); }).length;
+}
+
 function enqueueOp(op) {
   op.id = op.id || ('op_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9));
   op.attempts = 0;
+  op.ts = Date.now();
+  op.by = (session && session.empId != null) ? session.empId : null;
   SYNC.queue.push(op);
   saveQueue();
   updateSyncBadge();
@@ -1116,46 +1144,150 @@ function enqueueOp(op) {
 
 async function drainQueue() {
   if (SYNC.syncing || !SYNC.queue.length || !sb || !SYNC.online) return;
+  // Never send while signed out: the server would silently ignore the write
+  // and the action (e.g. a clock-out) would be lost.
+  if (!signedIn()) return;
   SYNC.syncing = true;
   updateSyncBadge();
 
-  const remaining = [];
-  for (const op of SYNC.queue) {
-    try {
-      await applyOp(op);
-      // Success — don't re-queue
-    } catch(e) {
-      op.attempts = (op.attempts || 0) + 1;
-      op.lastError = String(e.message || e);
-      // Exponential backoff: drop after 10 attempts
-      if (op.attempts < 10) {
-        remaining.push(op);
-      } else {
-        console.error('Op exceeded retry limit, dropping:', op);
+  const blocked = {};   // records whose earlier action failed — keep later ones in order
+  try {
+    for (let i = 0; i < SYNC.queue.length; i++) {
+      const op = SYNC.queue[i];
+      if (op.done || !opIsMine(op)) continue;
+      const cid = opCid(op);
+      if (cid && blocked[cid]) continue;
+      try {
+        await applyOp(op);
+        op.done = true;
+      } catch (e) {
+        op.attempts = (op.attempts || 0) + 1;
+        op.lastError = String((e && e.message) || e);
+        op.ts = op.ts || Date.now();
+        if (cid) blocked[cid] = true;
+        if (Date.now() - op.ts > OP_MAX_AGE_MS) {
+          console.error('Op could not sync for 72h, dropping:', op);
+          op.done = true;
+        }
       }
     }
+  } finally {
+    SYNC.queue = SYNC.queue.filter(function (o) { return !o.done; });
+    saveQueue();
+    SYNC.syncing = false;
+    SYNC.lastSync = Date.now();
+    updateSyncBadge();
   }
-  SYNC.queue = remaining;
-  saveQueue();
-  SYNC.syncing = false;
-  SYNC.lastSync = Date.now();
-  updateSyncBadge();
+}
+
+// Keep trying to sync this agent's actions for up to `ms` milliseconds.
+async function flushQueue(ms) {
+  var end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (!myPendingCount()) return true;
+    if (!SYNC.online || !sb) return false;
+    if (!SYNC.syncing) { await drainQueue(); if (!myPendingCount()) return true; }
+    await new Promise(function (r) { setTimeout(r, 400); });
+  }
+  return !myPendingCount();
+}
+
+// Does the record still look the way this action expected? (same rule the
+// server applies in applyOp)
+function casOk(o, r) {
+  if (!o.cas) return true;
+  if ('break_start' in o.cas) {
+    var want = o.cas.break_start == null ? null : Number(o.cas.break_start);
+    var have = r.breakStart == null ? null : Number(r.breakStart);
+    if (want !== have) return false;
+  }
+  // "start break at T" is void if a break ending at/after T is already recorded
+  if (o.cas.ended_before != null && r.breakEnd != null && Number(r.breakEnd) >= Number(o.cas.ended_before)) return false;
+  return true;
+}
+
+// Re-apply this computer's not-yet-synced actions on top of a record that
+// just came from the server, so a server copy never undoes a local
+// clock-out / break that is still on its way up.
+function overlayPending(r, skipOp) {
+  if (!r || !r.client_id) return r;
+  SYNC.queue.forEach(function (o) {
+    if (o === skipOp || o.done || o.type !== 'update_record' || o.client_id !== r.client_id) return;
+    var p = o.payload || {};
+    if (!casOk(o, r)) {               // break part no longer applies
+      if (p.check_out != null && !r.checkOut) r.checkOut = Number(p.check_out);
+      return;
+    }
+    if ('check_out' in p)   r.checkOut   = p.check_out   ? Number(p.check_out)   : null;
+    if ('break_start' in p) r.breakStart = p.break_start ? Number(p.break_start) : null;
+    if ('break_end' in p)   r.breakEnd   = p.break_end   ? Number(p.break_end)   : null;
+    if ('break_mins' in p)  r.breakMins  = p.break_mins || 0;
+  });
+  return r;
+}
+
+// Put the server's copy of a record into the local list.
+function adoptServerRow(row, skipOp) {
+  var r = overlayPending(mapDbRecord(row), skipOp);
+  var idx = -1;
+  if (r.client_id) idx = records.findIndex(function (x) { return x.client_id === r.client_id; });
+  if (idx < 0) idx = records.findIndex(function (x) { return !x.client_id && x.id === r.id; });
+  if (idx >= 0) records[idx] = r; else records.push(r);
+  if (!r.breakStart) clearBrkPlan(r);
+  saveRecsLocal();
+  refreshCurrentPage();
 }
 
 async function applyOp(op) {
   if (!sb) throw new Error('No Supabase client');
   switch (op.type) {
     case 'insert_record': {
+      // A retry, or a second tab holding the same queued action, must never
+      // save one shift twice. Check first.
+      if (op.payload && op.payload.client_id) {
+        const chk = await sb.from('records').select('id').eq('client_id', op.payload.client_id).limit(1);
+        if (chk.error) throw chk.error;
+        if (chk.data && chk.data.length) break;
+      }
       const { error } = await sb.from('records').insert(op.payload);
-      if (error) throw error;
+      if (error && error.code !== '23505') throw error;
       break;
     }
     case 'update_record': {
-      const { error } = await sb.from('records')
-        .update(op.payload)
-        .eq('client_id', op.client_id);
+      let q = sb.from('records').update(op.payload).eq('client_id', op.client_id);
+      // Compare-and-set: a break change only applies if the server still has
+      // the break in the state this screen saw. Stops a stale tab / second
+      // computer / replayed action from adding the same break twice.
+      if (op.cas && ('break_start' in op.cas)) {
+        q = op.cas.break_start == null ? q.is('break_start', null)
+                                       : q.eq('break_start', op.cas.break_start);
+      }
+      if (op.cas && op.cas.ended_before != null) {
+        q = q.or('break_end.is.null,break_end.lt.' + Number(op.cas.ended_before));
+      }
+      const { data, error } = await q.select('*');
       if (error) throw error;
-      break;
+      if (data && data.length) break;
+
+      // Nothing was changed on the server — find out why.
+      const cur = await sb.from('records').select('*').eq('client_id', op.client_id).limit(1);
+      if (cur.error) throw cur.error;
+      if (!cur.data || !cur.data.length) throw new Error('Record not on server yet');   // retry later
+      if (op.cas) {
+        // The break was already started/ended somewhere else. Keep the
+        // server's break numbers; still record a clock-out if this was one.
+        let row = cur.data[0];
+        if (op.payload.check_out != null && !row.check_out) {
+          const co = await sb.from('records').update({ check_out: op.payload.check_out })
+            .eq('client_id', op.client_id).select('*');
+          if (co.error) throw co.error;
+          if (!co.data || !co.data.length) throw new Error('Clock-out not saved');
+          row = co.data[0];
+        }
+        adoptServerRow(row, op);
+        break;
+      }
+      throw new Error('Update was not saved by the server');   // retry later
     }
     case 'upsert_employee': {
       const { error } = await sb.from('employees').upsert(op.payload);
@@ -1182,7 +1314,7 @@ window.addEventListener('online', () => {
   SYNC.online = true;
   updateSyncBadge();
   if (toast) toast('🟢 Back online — syncing…', 'info');
-  drainQueue();
+  refreshFromServer(true);
 });
 window.addEventListener('offline', () => {
   SYNC.online = false;
@@ -1192,6 +1324,35 @@ window.addEventListener('offline', () => {
 
 // Background drain every 30s
 setInterval(() => { if (SYNC.online) drainQueue(); }, 30000);
+
+// ── Keep an old / background tab honest ──────────────────────────
+// A tab left open for hours can miss live updates and keep showing a break
+// (or shift) that was already ended elsewhere. Re-read the server whenever
+// the agent comes back to the tab.
+var _lastServerRefresh = 0;
+async function refreshFromServer(force) {
+  if (!sb || !SUPABASE_CONFIGURED || !SYNC.online || !signedIn()) return;
+  if (!force && Date.now() - _lastServerRefresh < 60000) return;
+  _lastServerRefresh = Date.now();
+  try {
+    await drainQueue();
+    var ok = await loadFromSupabase();
+    if (ok && signedIn()) {
+      if (session.empId) session.emp = getEmp(session.empId) || session.emp;
+      refreshCurrentPage();
+    }
+  } catch (e) { console.warn('refreshFromServer failed:', e); }
+}
+document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshFromServer(false); });
+window.addEventListener('focus', function () { refreshFromServer(false); });
+// Two tabs in the same browser: when one saves, the other picks it up at once.
+window.addEventListener('storage', function (ev) {
+  if (ev.key !== 'st_recs' || !ev.newValue) return;
+  try {
+    var arr = JSON.parse(ev.newValue);
+    if (Array.isArray(arr)) { records = arr.map(function (r) { return overlayPending(r); }); refreshCurrentPage(); }
+  } catch (e) {}
+});
 
 // Update the badge in the topbar
 function updateSyncBadge() {
@@ -1247,15 +1408,20 @@ function unsubscribeRealtime() {
 }
 
 function handleRTRecord(payload) {
-  // Apply change to local records cache
-  if (payload.eventType === 'INSERT') {
-    const r = mapDbRecord(payload.new);
-    if (!records.some(x => x.id === r.id || x.client_id === r.client_id)) records.push(r);
-  } else if (payload.eventType === 'UPDATE') {
-    const r = mapDbRecord(payload.new);
-    let idx = records.findIndex(x => x.id === r.id);
-    if (idx < 0 && r.client_id) idx = records.findIndex(x => x.client_id === r.client_id);
+  // Apply change to local records cache. Match on client_id first: a record
+  // created on this computer has a temporary local id that can equal a
+  // different record's server id.
+  var findIdx = function (r) {
+    var i = -1;
+    if (r.client_id) i = records.findIndex(function (x) { return x.client_id === r.client_id; });
+    if (i < 0) i = records.findIndex(function (x) { return !x.client_id && x.id === r.id; });
+    return i;
+  };
+  if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+    const r = overlayPending(mapDbRecord(payload.new));
+    const idx = findIdx(r);
     if (idx >= 0) records[idx] = r; else records.push(r);
+    if (!r.breakStart) clearBrkPlan(r);
   } else if (payload.eventType === 'DELETE') {
     records = records.filter(x => x.id !== payload.old.id);
   }
@@ -1410,7 +1576,16 @@ async function loadFromSupabase() {
     const { data: recs, error: e3 } = await sb.from('records')
       .select('*').gte('date', sinceStr).order('check_in', { ascending: false }).limit(5000);
     if (e3) throw e3;
-    records = (recs || []).map(mapDbRecord);
+    var fresh = (recs || []).map(function (row) { return overlayPending(mapDbRecord(row)); });
+    // Keep shifts started on this computer that have not reached the server yet
+    SYNC.queue.forEach(function (o) {
+      if (o.done || o.type !== 'insert_record' || !o.payload || !o.payload.client_id) return;
+      if (fresh.some(function (x) { return x.client_id === o.payload.client_id; })) return;
+      var lr = overlayPending(mapDbRecord(o.payload));
+      lr.id = fresh.reduce(function (m, x) { return Math.max(m, Number(x.id) || 0); }, 0) + 1;
+      fresh.push(lr);
+    });
+    records = fresh;
 
     saveEmpsLocal();
     saveRecsLocal();
@@ -1444,7 +1619,20 @@ async function sbSignIn(empCode, password) {
 async function sbSignOut() {
   if (!sb) return;
   unsubscribeRealtime();
-  try { await sb.auth.signOut(); } catch(e){}
+  // If the server can't be reached, a normal sign-out leaves the saved login
+  // in the browser — and the next page load signs the agent straight back in.
+  // Always clear the login on this computer.
+  try {
+    var r = await sb.auth.signOut();
+    if (r && r.error) await sb.auth.signOut({ scope: 'local' });
+  } catch(e) {
+    try { await sb.auth.signOut({ scope: 'local' }); } catch(e2) {}
+  }
+  try {
+    Object.keys(localStorage).forEach(function (k) {
+      if (/^sb-.*-auth-token/.test(k)) localStorage.removeItem(k);
+    });
+  } catch(e) {}
 }
 
 async function sbCurrentUser() {
@@ -1539,6 +1727,25 @@ var ACTIVE_MAX_MS = 18*60*60*1000; // 18h — longer than any shift
 var BREAK_WARN_MIN = 45;  // reminder toast at 45 minutes
 var BREAK_MAX_MIN  = 60;  // hard cap — break auto-ends here
 var _brkWarned = {};      // rec id -> already warned this session
+// ── BUFFER (GRACE) TIMES — change these two numbers to adjust ──
+// Break buffer: coming back up to this many minutes after the planned break
+// length still counts as the planned length. Past the buffer, only the
+// minutes beyond the buffer are added (30m plan, back at 40m, 5m buffer = 35m).
+var BREAK_GRACE_MIN = 5;
+// Clock-in / clock-out buffer: up to this many minutes late in, or early out,
+// is not marked Late / Early and does not cost the agent a full-shift day.
+var CLOCK_GRACE_MIN = 15;
+// Break time a full-shift day is allowed. Present = worked time of at least
+// (shift length - this allowance), after the clock buffer is credited.
+// (Was 90% of the shift = 8h06m of a 9h shift, which an on-time agent with a
+// normal 60-minute break could never reach.)
+var BREAK_ALLOW_MIN = 60;
+// Minutes to record for a break that ran `elaMin` minutes.
+function countedBreakMins(rec,elaMin){
+  var p=getBrkPlan(rec),m=elaMin;
+  if(p&&p.mins>0&&elaMin>p.mins){m=p.mins+Math.max(0,elaMin-p.mins-BREAK_GRACE_MIN);}
+  return Math.max(0,Math.min(m,BREAK_MAX_MIN));
+}
 // Break planner + alerts: the agent picks a duration when starting a break;
 // when it's up we play a sound, show a full-screen "break over" popup, and
 // fire a desktop notification (covers minimized/background tabs). Plans are
@@ -1546,7 +1753,7 @@ var _brkWarned = {};      // rec id -> already warned this session
 var BRK_ALERT_REBEEP_MS = 60000;  // re-alert (sound + system notification) every 60s until the break is ended
 var _audioCtx = null;
 // Build stamp — check the browser console (F12) to confirm which version is live
-var ST_BUILD='v2.2 \u2014 cross-tab break alerts (2026-07-29)';
+var ST_BUILD='v2.4 \u2014 sync fixes + break/clock buffer (2026-10-11)';
 try{console.log('%cShiftTrack Pro '+ST_BUILD,'color:#6c63ff;font-weight:bold;font-size:13px');}catch(e){}
 function activeRec(eid){
   var now=Date.now();
@@ -1787,12 +1994,13 @@ function autoEndOverBreaks(){
       if(Number(r.empId)===Number(session.empId))toast('⏰ Still on break ('+BREAK_WARN_MIN+'m). It auto-ends at '+BREAK_MAX_MIN+'m.','info');
     }
     if(ela>=BREAK_MAX_MIN*60000){
+      var _bs=Number(r.breakStart);
       r.breakEnd=Number(r.breakStart)+BREAK_MAX_MIN*60000;
       r.breakMins=(Number(r.breakMins)||0)+BREAK_MAX_MIN;
       r.breakStart=null;clearBrkPlan(r);delete _brkWarned[r.id];changed=true;
       if(Number(r.empId)===Number(session.empId))toast('⏱ Break auto-ended at the '+BREAK_MAX_MIN+'-minute limit.','info');
       else{var _e=getEmp(r.empId);toast('⏱ '+(_e?_e.name:'Agent')+"'s forgotten break auto-ended at "+BREAK_MAX_MIN+'m.','info');}
-      if(SUPABASE_CONFIGURED&&r.client_id){enqueueOp({type:'update_record',client_id:r.client_id,payload:{break_start:null,break_end:r.breakEnd,break_mins:r.breakMins}});}
+      if(SUPABASE_CONFIGURED&&r.client_id){enqueueOp({type:'update_record',client_id:r.client_id,cas:{break_start:_bs},payload:{break_start:null,break_end:r.breakEnd,break_mins:r.breakMins}});}
     }
   });
   if(changed){
@@ -1949,7 +2157,39 @@ function enterApp(){
   else{goTo('myday');}
   if(sb&&SUPABASE_CONFIGURED)initSignals();
 }
-async function doLogout(){
+var _logoutBusy=false,_logoutWarnAt=0;
+function logoutChoice(clockOutToo){
+  closeModal();
+  if(clockOutToo)doClock('out');
+  doLogout({asked:true});
+}
+async function doLogout(opts){
+  opts=opts||{};
+  if(_logoutBusy)return;
+  // Logging out does NOT stop the shift timer. Ask, so nobody leaves a shift
+  // running by accident (that is how 17-hour days end up in the log).
+  if(!opts.force&&!opts.asked&&session&&session.empId&&activeRec(session.empId)){
+    openModal('m-logout');
+    return;
+  }
+  _logoutBusy=true;
+  try{
+    // Make sure the last clock-out / break has reached the server BEFORE
+    // signing out. Once signed out, the server ignores it.
+    if(sb&&SUPABASE_CONFIGURED&&myPendingCount()){
+      toast('⏳ Saving your last action…','info');
+      var synced=await flushQueue(8000);
+      if(!synced&&!opts.force&&Date.now()-_logoutWarnAt>30000){
+        _logoutWarnAt=Date.now();
+        toast('Your last action has not reached the server yet. Check the internet and press Logout again. (Press it twice to leave anyway — the action stays saved on this computer.)','err');
+        return;
+      }
+    }
+    _logoutWarnAt=0;
+    await doLogoutNow();
+  }finally{_logoutBusy=false;}
+}
+async function doLogoutNow(){
   teardownSignals();
   await sbSignOut();
   session={isAdmin:false,empId:null,emp:null};
@@ -1977,7 +2217,7 @@ function initSignals(){
     var eid=msg&&msg.payload?msg.payload.emp_id:null;
     if(eid!=null && session && !session.isAdmin && Number(session.empId)===Number(eid)){
       toast('You have been signed out by an administrator.','info');
-      setTimeout(function(){ doLogout(); }, 700);
+      setTimeout(function(){ doLogout({force:true}); }, 700);
     }
   });
   SIG.channel.subscribe();
@@ -1998,9 +2238,10 @@ function adminForceLogout(empId){
     var ar=activeRec(empId);
     if(ar){
       var now=Date.now();
-      if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.min(Math.floor((now-ar.breakStart)/60000),BREAK_MAX_MIN);ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
+      var fBrk=ar.breakStart?Number(ar.breakStart):null;
+      if(fBrk){ar.breakMins=(Number(ar.breakMins)||0)+Math.min(Math.floor((now-fBrk)/60000),BREAK_MAX_MIN);ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
       ar.checkOut=now;saveRecs();
-      if(ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
+      if(ar.client_id){enqueueOp(clockOutOp(ar,fBrk));}
     }
     // Signal the agent's live client to sign itself out
     if(SIG.channel){ try{ SIG.channel.send({type:'broadcast',event:'force_logout',payload:{emp_id:empId}}); }catch(e){} }
@@ -2153,6 +2394,14 @@ function buildWeekBar(eid,emp){
 // ═══════════════════════════════════════════════════════════════
 //  CLOCK IN/OUT/BREAK
 // ═══════════════════════════════════════════════════════════════
+// Build the server update for a clock-out. Break numbers are only sent when a
+// break was actually running, and then only if the server still has that
+// same break open (cas) — so a clock-out can never overwrite break totals.
+function clockOutOp(ar,brkWas){
+  var op={type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut}};
+  if(brkWas){op.cas={break_start:brkWas};op.payload.break_start=null;op.payload.break_end=ar.breakEnd;op.payload.break_mins=ar.breakMins;}
+  return op;
+}
 function doClock(act){
   var eid=session.empId,ar=activeRec(eid),now=Date.now();
   if(act==='in'){
@@ -2162,21 +2411,24 @@ function doClock(act){
     if(SUPABASE_CONFIGURED){enqueueOp({type:'insert_record',payload:recToDb(rec)});}
   } else if(act==='out'){
     if(!ar){toast('No active session.','err');return;}
-    if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.min(Math.floor((now-ar.breakStart)/60000),BREAK_MAX_MIN);ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
+    var oBrk=ar.breakStart?Number(ar.breakStart):null;
+    if(oBrk){ar.breakMins=(Number(ar.breakMins)||0)+countedBreakMins(ar,Math.floor((now-oBrk)/60000));ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
     ar.checkOut=now;saveRecs();toast('✅ Clocked out. Great work!','ok');renderMyDay();
-    if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
+    if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp(clockOutOp(ar,oBrk));}
   } else if(act==='brkS'){
     if(!ar){toast('Clock in first.','err');return;}
     if(ar.breakStart){toast('Already on break.','err');return;}
     ar.breakStart=now;saveRecs();toast('☕ Break started!','info');renderMyDay();
-    if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{break_start:ar.breakStart}});}
+    if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,cas:{break_start:null,ended_before:ar.breakStart},payload:{break_start:ar.breakStart}});}
   } else if(act==='brkE'){
     if(!ar||!ar.breakStart){toast('No active break.','err');return;}
-    var bEla=Math.floor((now-ar.breakStart)/60000),bOver=bEla>BREAK_MAX_MIN;
-    ar.breakMins=(ar.breakMins||0)+Math.min(bEla,BREAK_MAX_MIN);
-    ar.breakEnd=bOver?Number(ar.breakStart)+BREAK_MAX_MIN*60000:now;ar.breakStart=null;clearBrkPlan(ar);
-    saveRecs();toast(bOver?'⏱ Break ran '+fmtHM(bEla)+' — counted at the '+BREAK_MAX_MIN+'m cap.':'✅ Break ended. Welcome back!',bOver?'info':'ok');renderMyDay();
-    if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,payload:{break_start:null,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
+    var bStart=Number(ar.breakStart);
+    var bEla=Math.floor((now-bStart)/60000),bOver=bEla>BREAK_MAX_MIN;
+    var bCnt=countedBreakMins(ar,bEla);
+    ar.breakMins=(Number(ar.breakMins)||0)+bCnt;
+    ar.breakEnd=bOver?bStart+BREAK_MAX_MIN*60000:now;ar.breakStart=null;clearBrkPlan(ar);
+    saveRecs();toast(bOver?'⏱ Break ran '+fmtHM(bEla)+' — counted at the '+BREAK_MAX_MIN+'m cap.':(bCnt<bEla?'✅ Break ended — '+fmtHM(bEla)+' taken, counted as '+fmtHM(bCnt)+' ('+BREAK_GRACE_MIN+'m buffer).':'✅ Break ended. Welcome back!'),bOver?'info':'ok');renderMyDay();
+    if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,cas:{break_start:bStart},payload:{break_start:null,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
   }
 }
 
@@ -2199,10 +2451,11 @@ function closeStaleRecords(){
     }
     if(co==null||co<=Number(r.checkIn))co=Number(r.checkIn)+8*3600000; // fallback: 8h
     if(co>now)co=now; // never in the future
-    if(r.breakStart){r.breakEnd=co;r.breakStart=null;clearBrkPlan(r);}
+    var sBrk=r.breakStart?Number(r.breakStart):null;
+    if(sBrk){r.breakEnd=co;r.breakStart=null;clearBrkPlan(r);}
     r.checkOut=co;changed=true;
     if(SUPABASE_CONFIGURED&&r.client_id){
-      enqueueOp({type:'update_record',client_id:r.client_id,payload:{check_out:r.checkOut,break_start:null,break_end:r.breakEnd,break_mins:r.breakMins}});
+      enqueueOp(clockOutOp(r,sBrk));
     }
   });
   if(changed)saveRecs();
@@ -2260,12 +2513,13 @@ function adminClockOut(empId){
   document.getElementById('m-conf-ok').textContent='⏏ Clock Out';
   document.getElementById('m-conf-ok').onclick=function(){
     var now=Date.now();
-    if(ar.breakStart){ar.breakMins=(ar.breakMins||0)+Math.floor((now-ar.breakStart)/60000);ar.breakEnd=now;ar.breakStart=null;}
+    var aBrk=ar.breakStart?Number(ar.breakStart):null;
+    if(aBrk){ar.breakMins=(Number(ar.breakMins)||0)+Math.min(Math.floor((now-aBrk)/60000),BREAK_MAX_MIN);ar.breakEnd=now;ar.breakStart=null;clearBrkPlan(ar);}
     ar.checkOut=now;
     saveRecs();closeModal();renderDash();
     toast('✅ '+emp.name+' clocked out by admin','ok');
     if(SUPABASE_CONFIGURED&&ar.client_id){
-      enqueueOp({type:'update_record',client_id:ar.client_id,payload:{check_out:ar.checkOut,break_start:ar.breakStart,break_end:ar.breakEnd,break_mins:ar.breakMins}});
+      enqueueOp(clockOutOp(ar,aBrk));
     }
   };
 }
@@ -2910,23 +3164,27 @@ function computeDailyActivity(empId, dateStr){
   var late=null;
   if(loginTime&&shiftWin){
     var diffMin=Math.floor((loginTime-shiftWin.start.getTime())/60000);
-    late={late:diffMin>0,minutes:Math.max(0,diffMin),onTime:diffMin<=0};
+    var lateG=diffMin>0&&diffMin<=CLOCK_GRACE_MIN;
+    late={late:diffMin>CLOCK_GRACE_MIN,minutes:diffMin>CLOCK_GRACE_MIN?diffMin:0,onTime:diffMin<=CLOCK_GRACE_MIN,graceMin:lateG?diffMin:0};
   }
 
   // Early logout: logoutTime < shift.end
   var early=null;
   if(logoutTime&&shiftWin){
     var diffMin2=Math.floor((shiftWin.end.getTime()-logoutTime)/60000);
-    early={early:diffMin2>0,minutes:Math.max(0,diffMin2),onTime:diffMin2<=0};
+    var earlyG=diffMin2>0&&diffMin2<=CLOCK_GRACE_MIN;
+    early={early:diffMin2>CLOCK_GRACE_MIN,minutes:diffMin2>CLOCK_GRACE_MIN?diffMin2:0,onTime:diffMin2<=CLOCK_GRACE_MIN,graceMin:earlyG?diffMin2:0};
   }
 
-  // Attendance status
+  // Attendance status. Minutes inside the clock-in/clock-out buffer are
+  // credited here only — the hours shown on screen stay the real hours.
+  var attHrs=activeHrs+(((late&&late.graceMin)||0)+((early&&early.graceMin)||0))/60;
   var att='absent';
   if(wo)att='wo';
   else if(hasOpen)att='working';
   else if(recs.length===0)att='absent';
-  else if(activeHrs>=shiftHrs*0.9)att='present';
-  else if(activeHrs>=shiftHrs*0.5)att='half-day';
+  else if(Math.round(attHrs*60)>=Math.round(shiftHrs*60)-BREAK_ALLOW_MIN)att='present';
+  else if(attHrs>=shiftHrs*0.5)att='half-day';
   else att='partial';
 
   return {
