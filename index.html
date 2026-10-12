@@ -372,7 +372,7 @@ select.fi{padding-right:32px;background-image:url("data:image/svg+xml;charset=ut
 .ticker-lbl{font-size:11px;font-weight:600;letter-spacing:2.5px;opacity:.75;margin-bottom:10px;text-transform:uppercase}
 .ticker-val{font-size:78px;font-weight:700;letter-spacing:4px;line-height:1;font-family:var(--font-mono);transition:color .3s;text-shadow:0 4px 24px rgba(0,0,0,.15)}
 .ticker-sub{font-size:13px;opacity:.8;font-weight:500;margin-top:12px}
-.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:rgba(255,255,255,.15);border-radius:var(--r-lg);overflow:hidden;margin-bottom:24px;position:relative;border:1px solid rgba(255,255,255,.12)}
+.mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;background:rgba(255,255,255,.15);border-radius:var(--r-lg);overflow:hidden;margin-bottom:24px;position:relative;border:1px solid rgba(255,255,255,.12)}
 .mini-cell{background:rgba(255,255,255,.10);padding:14px 10px;text-align:center;backdrop-filter:blur(8px)}
 .mini-lbl{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;opacity:.7;margin-bottom:5px}
 .mini-val{font-size:22px;font-weight:800;font-family:var(--font-display);letter-spacing:-.5px}
@@ -1740,10 +1740,17 @@ var CLOCK_GRACE_MIN = 15;
 // (Was 90% of the shift = 8h06m of a 9h shift, which an on-time agent with a
 // normal 60-minute break could never reach.)
 var BREAK_ALLOW_MIN = 60;
+// Agents with their own break buffer, by Agent ID (the login ID, which is
+// unique). Add more like:  { EMP002: 10, EMP029: 8 }
+var BREAK_GRACE_BY_ID = { EMP002: 10 };
+function breakGraceFor(rec){
+  var e=rec?getEmp(rec.empId):null,c=e&&e.empCode?String(e.empCode).trim().toUpperCase():'';
+  return (c&&BREAK_GRACE_BY_ID.hasOwnProperty(c))?BREAK_GRACE_BY_ID[c]:BREAK_GRACE_MIN;
+}
 // Minutes to record for a break that ran `elaMin` minutes.
 function countedBreakMins(rec,elaMin){
   var p=getBrkPlan(rec),m=elaMin;
-  if(p&&p.mins>0&&elaMin>p.mins){m=p.mins+Math.max(0,elaMin-p.mins-BREAK_GRACE_MIN);}
+  if(p&&p.mins>0&&elaMin>p.mins){m=p.mins+Math.max(0,elaMin-p.mins-breakGraceFor(rec));}
   return Math.max(0,Math.min(m,BREAK_MAX_MIN));
 }
 // Break planner + alerts: the agent picks a duration when starting a break;
@@ -1753,7 +1760,7 @@ function countedBreakMins(rec,elaMin){
 var BRK_ALERT_REBEEP_MS = 60000;  // re-alert (sound + system notification) every 60s until the break is ended
 var _audioCtx = null;
 // Build stamp — check the browser console (F12) to confirm which version is live
-var ST_BUILD='v2.4 \u2014 sync fixes + break/clock buffer (2026-10-11)';
+var ST_BUILD='v2.7 \u2014 EMP002 break buffer 10m (2026-10-13)';
 try{console.log('%cShiftTrack Pro '+ST_BUILD,'color:#6c63ff;font-weight:bold;font-size:13px');}catch(e){}
 function activeRec(eid){
   var now=Date.now();
@@ -2029,6 +2036,13 @@ function startClock(){
         if(ar&&ar.breakStart){var _p=getBrkPlan(ar),_ov=_p&&Date.now()>Number(_p.start)+_p.mins*60000;tk.textContent=fmtBrkTicker(ar);tk.style.color=_ov?'#ff6b6b':'#ff9800';}
         else{tk.textContent=fmtEla(Date.now()-since-(ar?(Number(ar.breakMins)||0)*60000:0));tk.style.color='rgba(255,255,255,.95)';}
       }else{tk.textContent=t;tk.style.color='rgba(255,255,255,.6)';}
+    }
+    var mdL=document.getElementById('md-login');
+    if(mdL&&session.empId){
+      var _tH=todayHrs(session.empId),_bM=todayBrk(session.empId);
+      mdL.textContent=fmtH(_tH+_bM/60);
+      var mdN=document.getElementById('md-net');if(mdN)mdN.textContent=fmtH(_tH);
+      var mdB=document.getElementById('md-brk');if(mdB)mdB.textContent=_bM+'m';
     }
     var bl=document.getElementById('brk-live');
     if(bl&&session.empId){var ar=activeRec(session.empId);if(ar&&ar.breakStart)bl.textContent=fmtBrkTicker(ar);}
@@ -2333,13 +2347,14 @@ function renderMyDay(){
         '<div class="hero-badge">'+LB[status]+'</div>'+
       '</div>'+
       '<div class="ticker-block">'+
-        '<div class="ticker-lbl">'+(status==='in'?'Work Session':status==='brk'?'Break Timer':'Current Time')+'</div>'+
+        '<div class="ticker-lbl">'+(status==='in'?'Work Time \u00b7 breaks not counted':status==='brk'?'Break Timer':'Current Time')+'</div>'+
         '<div class="ticker-val" id="live-ticker" data-mode="'+(status!=='out'?'in':'idle')+'" data-since="'+since+'" style="color:'+(status==='out'?'rgba(255,255,255,.5)':status==='brk'?'#ffd166':'rgba(255,255,255,.95)')+'">--:--:--</div>'+
         '<div class="ticker-sub">'+(status==='in'?'Clocked in at <strong>'+fmtT(ar.checkIn)+'</strong>':status==='brk'?'Break since <strong>'+fmtT(ar.breakStart)+'</strong>'+(brkPlan?' · planned <strong>'+brkPlan.mins+'m</strong>':''):tH>0?'Total today: <strong>'+fmtH(tH)+'</strong>':'Tap Clock In to begin your shift')+'</div>'+
       '</div>'+
       '<div class="mini-grid">'+
-        '<div class="mini-cell"><div class="mini-lbl">Today Net</div><div class="mini-val">'+fmtH(tH)+'</div></div>'+
-        '<div class="mini-cell"><div class="mini-lbl">Break Time</div><div class="mini-val" style="color:#ffd166">'+brkM+'m</div></div>'+
+        '<div class="mini-cell"><div class="mini-lbl">Total Login</div><div class="mini-val" id="md-login">'+fmtH(tH+brkM/60)+'</div></div>'+
+        '<div class="mini-cell"><div class="mini-lbl">Break Time</div><div class="mini-val" id="md-brk" style="color:#ffd166">'+brkM+'m</div></div>'+
+        '<div class="mini-cell"><div class="mini-lbl">Work Time</div><div class="mini-val" id="md-net">'+fmtH(tH)+'</div></div>'+
         '<div class="mini-cell"><div class="mini-lbl">All Time</div><div class="mini-val">'+fmtH(totH)+'</div></div>'+
       '</div>'+
       '<div class="hero-btns">'+
@@ -2424,10 +2439,10 @@ function doClock(act){
     if(!ar||!ar.breakStart){toast('No active break.','err');return;}
     var bStart=Number(ar.breakStart);
     var bEla=Math.floor((now-bStart)/60000),bOver=bEla>BREAK_MAX_MIN;
-    var bCnt=countedBreakMins(ar,bEla);
+    var bCnt=countedBreakMins(ar,bEla),bGr=breakGraceFor(ar);
     ar.breakMins=(Number(ar.breakMins)||0)+bCnt;
     ar.breakEnd=bOver?bStart+BREAK_MAX_MIN*60000:now;ar.breakStart=null;clearBrkPlan(ar);
-    saveRecs();toast(bOver?'⏱ Break ran '+fmtHM(bEla)+' — counted at the '+BREAK_MAX_MIN+'m cap.':(bCnt<bEla?'✅ Break ended — '+fmtHM(bEla)+' taken, counted as '+fmtHM(bCnt)+' ('+BREAK_GRACE_MIN+'m buffer).':'✅ Break ended. Welcome back!'),bOver?'info':'ok');renderMyDay();
+    saveRecs();toast(bOver?'⏱ Break ran '+fmtHM(bEla)+' — counted at the '+BREAK_MAX_MIN+'m cap.':(bCnt<bEla?'✅ Break ended — '+fmtHM(bEla)+' taken, counted as '+fmtHM(bCnt)+' ('+bGr+'m buffer).':'✅ Break ended. Welcome back!'),bOver?'info':'ok');renderMyDay();
     if(SUPABASE_CONFIGURED&&ar.client_id){enqueueOp({type:'update_record',client_id:ar.client_id,cas:{break_start:bStart},payload:{break_start:null,break_end:ar.breakEnd,break_mins:ar.breakMins}});}
   }
 }
